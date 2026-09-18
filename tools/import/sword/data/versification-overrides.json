@@ -1,0 +1,29 @@
+{
+ "$comment": [
+  "Modules whose text is numbered in a different versification than their .conf declares.",
+  "swordcheck.py batch passes each entry to sword2bible as --versification <name>, and the",
+  "verifier checks the result against that system.",
+  "",
+  "Add an entry only on evidence: swordcheck's versification_looks_mt / strongs_misplaced /",
+  "versification_shift findings, confirmed by converting with the override and re-verifying",
+  "(the misplaced count must fall and the holes must stay acceptable). Record the evidence.",
+  "",
+  "An override cannot undo what the module's build already did: a module compiled with KJV",
+  "keys from Hebrew-numbered text has no key for MT Exod 7:26-29 and the like, so those",
+  "verses were folded or lost upstream and remain holes. That trade-off is a human decision,",
+  "so the candidates below are NOT active."
+ ],
+ "overrides": {},
+ "candidates": {
+  "GerLut1912": {
+   "versification": "German",
+   "evidence": "Declares KJV. versification_looks_mt: many OT chapters align with the KJV only when read with Hebrew numbering, as German Bibles number the OT (the German map is the MT map plus German specifics). No Strong's to confirm. Not yet re-verified with the override."
+  }
+ },
+ "rejected": {
+  "engmsb2024eb": {
+   "versification": "MT",
+   "evidence": "Its Strong's tags match the neighbouring KJV verse in the MT-difference chapters (466 verses), but its verse lengths line up with the KJV in every chapter: the TEXT is KJV-numbered and only the tags follow Hebrew numbering. Converting it as MT shifted 28 chapters and left 180 holes. Reported as strongs_tags_offset."
+  }
+ }
+}

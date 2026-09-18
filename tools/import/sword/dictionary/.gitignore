@@ -1,0 +1,10 @@
+# Compiled binary
+sword2dictionary
+
+# SQLite databases
+*.db
+*.db-shm
+*.db-wal
+
+# Test outputs
+dictionary_*.db

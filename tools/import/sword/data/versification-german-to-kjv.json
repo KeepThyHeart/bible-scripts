@@ -1,0 +1,38 @@
+{
+ "$comment": [
+  "German (and Luther, which sword2bible aliases to it) -> KJV-English verse map.",
+  "",
+  "DERIVATION: libsword 1.9's German and Luther systems are identical to each other, and in",
+  "the Old Testament identical to MT in every chapter except 2 Kgs 15 (39 verses; MT and KJV",
+  "38) and Neh 7 (73 verses like KJV; MT 72). German Bibles number the OT like the Hebrew",
+  "Bible, psalm superscriptions included. So this map EXTENDS the MT map and adds only what",
+  "differs; its own rules come first, and the first matching rule wins.",
+  "  - Neh 7: German numbers it like KJV, so the MT rule moving 7:72 to KJV 7:73 must not apply.",
+  "  - 2 Cor 13: German 13:12 is KJV 13:12-13, so German 13:13 is KJV 13:14.",
+  "  - Acts 19: German 19:40 covers KJV 19:40-41; KJV 19:41 stays a hole.",
+  "  - Rev 12:18 and 3 John 15 are handled by sword2bible's variant-verse table.",
+  "  - 2 Kgs 15:39 has no rule: the converter folds it onto 15:38.",
+  "Check any German or Luther conversion with tools/import/sword/verify/swordcheck.py."
+ ],
+ "versification": "German",
+ "target": "kjv-english",
+ "extends": "mt",
+ "rules": [
+  {
+   "b": 16,
+   "c": 7,
+   "from": 72,
+   "to": 73,
+   "dc": 7,
+   "off": 0
+  },
+  {
+   "b": 47,
+   "c": 13,
+   "from": 13,
+   "to": 13,
+   "dc": 13,
+   "off": 1
+  }
+ ]
+}

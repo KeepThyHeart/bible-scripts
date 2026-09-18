@@ -1,0 +1,28 @@
+# !KJV.zip
+
+# Build artifacts.
+# Every converter binary, not just sword2bible: book/sword2book and
+# devotional/sword2devotional were committed by accident because only the bible
+# one was listed here, and they then showed up as "modified" on every rebuild.
+sword2bible
+book/sword2book
+devotional/sword2devotional
+*.o
+*.a
+
+# Generated databases
+*.db
+*.db-shm
+*.db-wal
+
+# Temporary files
+*.tmp
+temp_*
+
+# Test outputs
+test*.db
+bible_*.db
+
+# sword-probe (verification) binary and Python caches
+probe/sword-probe
+__pycache__/

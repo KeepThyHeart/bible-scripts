@@ -1,0 +1,10 @@
+# Compiled binary
+sword2commentary
+
+# SQLite databases
+*.db
+*.db-shm
+*.db-wal
+
+# Test outputs
+commentary_*.db
