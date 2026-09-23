@@ -32,7 +32,7 @@ using namespace sword;
 
 namespace SwordCommon {
 
-    const char* const FORMAT_VERSION = "0.1";
+    const char* const FORMAT_VERSION = "0.2";
     const char* const CANON          = "protestant-66";
     const char* const VERSIFICATION  = "kjv-english";
 
@@ -1785,63 +1785,12 @@ namespace SwordCommon {
     // Unified verse linking
     // ==================================================================
 
-    // NOTE: hand-maintained copy of the Bible repo's schemas (see the note on
-    // MODULE_INFO_SCHEMA_SQL in sword_common.h). Load them instead.
-    const char* const MODULE_INFO_SCHEMA_SQL = R"SQL(
-        CREATE TABLE module_info (
-            info_id INTEGER PRIMARY KEY CHECK (info_id = 1),
-            module_uuid TEXT NOT NULL,
-            module_type TEXT NOT NULL,
-            abbreviation TEXT NOT NULL,
-            full_name TEXT NOT NULL,
-            format TEXT NOT NULL,
-            format_version TEXT NOT NULL DEFAULT '0.1',
-            content_version TEXT,
-            content_sha256 TEXT,
-            author TEXT,
-            publisher TEXT,
-            year_published INTEGER,
-            description TEXT,
-            language_code TEXT NOT NULL DEFAULT 'en',
-            is_original_language INTEGER NOT NULL DEFAULT 0,
-            right_to_left INTEGER NOT NULL DEFAULT 0,
-            copyright TEXT,
-            license_spdx TEXT,
-            license_url TEXT,
-            source_url TEXT,
-            versification TEXT NOT NULL DEFAULT 'kjv-english',
-            created_date TEXT DEFAULT CURRENT_TIMESTAMP,
-            metadata TEXT,
-            CHECK (is_original_language IN (0, 1)),
-            CHECK (right_to_left IN (0, 1))
-        );
-    )SQL";
-
-    const char* const VERSE_LINK_SCHEMA_SQL = R"SQL(
-        -- Unified content -> verse linking.
-        -- Range convention: verse_id_start inclusive, verse_id_end inclusive
-        -- and NOT NULL. A single verse is verse_id_end = verse_id_start, never NULL,
-        -- so a containment probe is uniformly
-        --   verse_id_start <= X AND verse_id_end >= X
-        -- with no NULL arm for a consumer to forget.
-        CREATE TABLE verse_link (
-            link_id         INTEGER PRIMARY KEY AUTOINCREMENT,
-            source_type     TEXT NOT NULL,
-            source_id       INTEGER NOT NULL,
-            verse_id_start  INTEGER NOT NULL,
-            verse_id_end    INTEGER NOT NULL,
-            link_type       TEXT NOT NULL DEFAULT 'reference',
-            sort_order      INTEGER NOT NULL DEFAULT 0,
-            context         TEXT,
-            metadata        TEXT
-        );
-
-        CREATE INDEX idx_verse_link_source ON verse_link(source_type, source_id, sort_order);
-        CREATE INDEX idx_verse_link_start  ON verse_link(verse_id_start);
-        CREATE INDEX idx_verse_link_range  ON verse_link(verse_id_start, verse_id_end);
-        -- The reverse pair, so containment can be driven from either side.
-        CREATE INDEX idx_verse_link_covering ON verse_link(verse_id_end, verse_id_start);
-    )SQL";
+    // Schema DDL used to be hand-copied here (see git history if you need the
+    // old MODULE_INFO_SCHEMA_SQL / VERSE_LINK_SCHEMA_SQL literals for
+    // reference); every converter now builds its database from
+    // SwordCommon::loadRepoSchema() (schema_bridge.h) instead, which loads
+    // the Bible repo's own schema files the same way scripts/lib/schema.js
+    // does for the Node importers.
 
     bool insertVerseLink(void* dbPtr,
                          const std::string& sourceType,

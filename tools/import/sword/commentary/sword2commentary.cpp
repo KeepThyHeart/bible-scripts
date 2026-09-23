@@ -43,12 +43,20 @@
 
 // Common library
 #include "sword_common.h"
+#include "schema_bridge.h"
+#include "compression.h"
+#include "content_digest.h"
 
 namespace fs = std::filesystem;
 using namespace sword;
 
 // Global database handle
 static sqlite3* db = nullptr;
+
+// --codec/--compress and --uuid (task 0035 requirements 3 and 5).
+static std::string g_codecOverride;   // "" = auto-decide from size (design §3.4)
+static std::string g_uuidOverride;    // "" = mint a fresh uuid as before
+static SwordCommon::CompressionOutcome g_compression;
 
 // Books rejected because they fall outside the 66-book Protestant canon.
 static std::map<std::string, int> g_skippedBooks;
@@ -100,6 +108,10 @@ int main(int argc, char* argv[]) {
         } else if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0) {
             printUsage(argv[0]);
             return 0;
+        } else if ((strcmp(argv[i], "--codec") == 0 || strcmp(argv[i], "--compress") == 0) && i + 1 < argc) {
+            g_codecOverride = argv[++i];
+        } else if (strcmp(argv[i], "--uuid") == 0 && i + 1 < argc) {
+            g_uuidOverride = argv[++i];
         }
     }
 
@@ -199,94 +211,43 @@ bool createDatabase(const std::string& dbPath) {
         return false;
     }
 
-    // Create schema
-    const char* schema = R"SQL(
-        -- Commentary entries.
-        --
-        -- verse_id_start / verse_id_end stay on the row: they are the entry's
-        -- own key and give it its ordering (there is no separate
-        -- sort_order column). verse_link additionally carries the same anchor
-        -- so that generic content->verse queries work identically across every
-        -- module type.
-        --
-        -- entry_level has no CHECK: it is an open, extensible set
-        -- validated at the repository boundary, not by the storage layer.
-        CREATE TABLE commentary_entry (
-            entry_id INTEGER PRIMARY KEY AUTOINCREMENT,
-            verse_id_start INTEGER,
-            verse_id_end INTEGER,
-            entry_level TEXT NOT NULL,
-            content TEXT NOT NULL,
-            content_file TEXT,
-            word_count INTEGER,
-            metadata TEXT
-        );
+    // Schema (module_info, commentary_entry, module_feature,
+    // compression_dictionary, verse_link — no FTS, no redundant indexes) is
+    // loaded from the Bible repo, not hand-copied (task 0035 / design §6.1 —
+    // see schema_bridge.h).
+    char* errMsg = nullptr;
+    std::string schema = SwordCommon::loadRepoSchema("Commentary.sql");
+    if (sqlite3_exec(db, schema.c_str(), nullptr, nullptr, &errMsg) != SQLITE_OK) {
+        std::cerr << "Failed to create schema from Commentary.sql: " << (errMsg ? errMsg : "(unknown)") << "\n";
+        sqlite3_free(errMsg);
+        return false;
+    }
 
-        CREATE INDEX idx_entry_verse_start ON commentary_entry(verse_id_start);
-        CREATE INDEX idx_entry_verse_end ON commentary_entry(verse_id_end);
-        CREATE INDEX idx_entry_level ON commentary_entry(entry_level);
-
-        -- Full-text search
-        -- Column 0 is the key (UNINDEXED); searchable columns follow. That
-        -- ordering is load-bearing for positional highlight()/snippet() calls.
-        CREATE VIRTUAL TABLE commentary_entry_fts USING fts5(
-            entry_id UNINDEXED,
-            content,
-            content='commentary_entry',
-            content_rowid='entry_id',
-            tokenize='porter unicode61'
-        );
-
-        -- FTS triggers (an external-content table needs the 'delete'
-        -- command form; a plain UPDATE/DELETE leaves stale terms in the index)
-        CREATE TRIGGER commentary_entry_fts_insert AFTER INSERT ON commentary_entry BEGIN
-            INSERT INTO commentary_entry_fts(rowid, entry_id, content)
-            VALUES (new.entry_id, new.entry_id, new.content);
-        END;
-
-        CREATE TRIGGER commentary_entry_fts_delete AFTER DELETE ON commentary_entry BEGIN
-            INSERT INTO commentary_entry_fts(commentary_entry_fts, rowid, entry_id, content)
-            VALUES('delete', old.entry_id, old.entry_id, old.content);
-        END;
-
-        CREATE TRIGGER commentary_entry_fts_update AFTER UPDATE ON commentary_entry BEGIN
-            INSERT INTO commentary_entry_fts(commentary_entry_fts, rowid, entry_id, content)
-            VALUES('delete', old.entry_id, old.entry_id, old.content);
-            INSERT INTO commentary_entry_fts(rowid, entry_id, content)
-            VALUES (new.entry_id, new.entry_id, new.content);
-        END;
-
-        -- Schema version
-        CREATE TABLE schema_version (
+    // schema_version is this repo's own build-provenance bookkeeping, not
+    // part of the module format schema — IF NOT EXISTS so it is harmless
+    // whether or not Commentary.sql also declares one.
+    if (sqlite3_exec(db, R"SQL(
+        CREATE TABLE IF NOT EXISTS schema_version (
             version_id INTEGER PRIMARY KEY AUTOINCREMENT,
             version_number TEXT NOT NULL,
             applied_date TEXT DEFAULT CURRENT_TIMESTAMP,
             notes TEXT,
             metadata TEXT
         );
-
-        INSERT INTO schema_version (version_number, notes)
-        VALUES ('0.1.0', 'Commentary module schema');
-    )SQL";
-
-    char* errMsg = nullptr;
-    if (sqlite3_exec(db, SwordCommon::MODULE_INFO_SCHEMA_SQL, nullptr, nullptr, &errMsg) != SQLITE_OK) {
-        std::cerr << "Failed to create module_info: " << (errMsg ? errMsg : "(unknown)") << "\n";
+    )SQL", nullptr, nullptr, &errMsg) != SQLITE_OK) {
+        std::cerr << "Failed to create schema_version: " << (errMsg ? errMsg : "(unknown)") << "\n";
         sqlite3_free(errMsg);
         return false;
     }
-
-    if (sqlite3_exec(db, schema, nullptr, nullptr, &errMsg) != SQLITE_OK) {
-        std::cerr << "Failed to create schema: " << (errMsg ? errMsg : "(unknown)") << "\n";
-        sqlite3_free(errMsg);
-        return false;
-    }
-
-    // One verse_link table, identical in every module database.
-    if (sqlite3_exec(db, SwordCommon::VERSE_LINK_SCHEMA_SQL, nullptr, nullptr, &errMsg) != SQLITE_OK) {
-        std::cerr << "Failed to create verse_link: " << (errMsg ? errMsg : "(unknown)") << "\n";
-        sqlite3_free(errMsg);
-        return false;
+    {
+        sqlite3_stmt* stmt = nullptr;
+        if (sqlite3_prepare_v2(db, "INSERT INTO schema_version (version_number, notes) VALUES (?, ?)",
+                               -1, &stmt, nullptr) == SQLITE_OK) {
+            sqlite3_bind_text(stmt, 1, SwordCommon::FORMAT_VERSION, -1, SQLITE_STATIC);
+            sqlite3_bind_text(stmt, 2, "Commentary module schema", -1, SQLITE_STATIC);
+            sqlite3_step(stmt);
+            sqlite3_finalize(stmt);
+        }
     }
 
     return true;
@@ -323,8 +284,8 @@ bool insertModuleInfo(const SwordCommon::ModuleIdentity& identity) {
             info_id, module_uuid, module_type, format, format_version,
             abbreviation, full_name, author, publisher, year_published,
             copyright, license_spdx, license_url, source_url, description,
-            language_code, versification, content_version, metadata
-        ) VALUES (1, ?, 'commentary', 'commentary-module', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            language_code, versification, content_version, metadata, compression
+        ) VALUES (1, ?, 'commentary', 'commentary-module', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     )SQL";
 
     sqlite3_stmt* stmt = nullptr;
@@ -333,8 +294,12 @@ bool insertModuleInfo(const SwordCommon::ModuleIdentity& identity) {
         return false;
     }
 
+    // --uuid overrides the minted identity (task 0035 requirement 5):
+    // a reconverted module reuses its existing uuid.
+    const std::string uuid = !g_uuidOverride.empty() ? g_uuidOverride : identity.uuid;
+
     int i = 1;
-    sqlite3_bind_text(stmt, i++, identity.uuid.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(stmt, i++, uuid.c_str(), -1, SQLITE_TRANSIENT);
     sqlite3_bind_text(stmt, i++, SwordCommon::FORMAT_VERSION, -1, SQLITE_STATIC);
     sqlite3_bind_text(stmt, i++, identity.abbreviation.c_str(), -1, SQLITE_TRANSIENT);
     sqlite3_bind_text(stmt, i++, identity.fullName.c_str(), -1, SQLITE_TRANSIENT);
@@ -356,6 +321,7 @@ bool insertModuleInfo(const SwordCommon::ModuleIdentity& identity) {
     sqlite3_bind_text(stmt, i++, SwordCommon::VERSIFICATION, -1, SQLITE_STATIC);
     bindTextOrNull(stmt, i++, identity.contentVersion);
     bindTextOrNull(stmt, i++, identity.metadataJson);
+    sqlite3_bind_text(stmt, i++, SwordCommon::CODEC_NONE, -1, SQLITE_STATIC); // compression: set for real by finalizeModuleInfo()
 
     bool success = (sqlite3_step(stmt) == SQLITE_DONE);
     if (!success) {
@@ -528,25 +494,22 @@ int64_t insertEntry(int64_t verseIdStart, int64_t verseIdEnd, const std::string&
  * stage that sees the source's real book names.
  */
 bool finalizeModuleInfo() {
-    std::string content;
-    content.reserve(4u * 1024u * 1024u);
-
-    sqlite3_stmt* select = nullptr;
-    if (sqlite3_prepare_v2(db,
-            "SELECT entry_id, verse_id_start, content FROM commentary_entry ORDER BY entry_id",
-            -1, &select, nullptr) != SQLITE_OK) {
-        return false;
+    // Compress (design §3: eligible at >=8MB decoded prose, or --codec/--compress
+    // overrides), THEN hash — content_sha256 is decode-aware so the digest is
+    // identical either way, but compressing first means module_info.compression
+    // is already correct by the time the digest read happens.
+    g_compression = SwordCommon::applyCompression(db, "commentary_entry", {"content"}, g_codecOverride);
+    std::cout << "  Compression: " << g_compression.codec;
+    if (g_compression.codec != SwordCommon::CODEC_NONE) {
+        std::cout << " (" << g_compression.rowsCompressed << " rows compressed, "
+                  << g_compression.dictionary.size() << "-byte dictionary)";
     }
-    while (sqlite3_step(select) == SQLITE_ROW) {
-        content += std::to_string(sqlite3_column_int64(select, 1));
-        content += '\t';
-        const unsigned char* text = sqlite3_column_text(select, 2);
-        if (text) content += reinterpret_cast<const char*>(text);
-        content += '\n';
-    }
-    sqlite3_finalize(select);
+    std::cout << "\n";
 
-    const std::string hash = SwordCommon::sha256Hex(content);
+    // Canonical, codec-invariant digest (design §2.7).
+    const std::string hash = SwordCommon::computeContentSha256(
+        db, "commentary_entry", "entry_id", {"content"}, {"content"},
+        g_compression.codec, g_compression.dictionary);
 
     // Rebuild the whole metadata object in C++ rather than merging with
     // json_patch(): the JSON1 extension is not guaranteed to be present in the
@@ -610,6 +573,11 @@ void printUsage(const char* programName) {
     std::cout << "Options:\n";
     std::cout << "  --input, -i   Input SWORD module ZIP file\n";
     std::cout << "  --output, -o  Output SQLite database file\n";
+    std::cout << "  --codec, --compress none|deflate|zstd\n";
+    std::cout << "                Override the publisher default (deflate if >=8MB decoded\n";
+    std::cout << "                prose, else none; design §3.4).\n";
+    std::cout << "  --uuid UUID   Reuse this module_uuid instead of minting a fresh one\n";
+    std::cout << "                (reconversion; see scripts/data/module-uuid-map.json).\n";
     std::cout << "  --help, -h    Show this help message\n\n";
     std::cout << "Books outside the 66-book Protestant canon are skipped with a warning.\n\n";
     std::cout << "Example:\n";

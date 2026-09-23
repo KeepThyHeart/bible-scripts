@@ -3,7 +3,7 @@
 
 CXX = g++
 CXXFLAGS = -std=c++17 -Wall -Wextra -O2 -I/usr/include/sword -I../common
-LDFLAGS = -L../common -lswordcommon -lsword -lsqlite3 -lzip
+LDFLAGS = -L../common -lswordcommon -lsword -lsqlite3 -lzip -lz -l:libzstd.so.1
 
 TARGET = sword-probe
 SOURCE = sword_probe.cpp

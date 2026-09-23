@@ -33,12 +33,20 @@ import re
 import shutil
 import sqlite3
 import statistics
+import struct
 import subprocess
 import sys
+import tempfile
 import time
 import unicodedata
 import urllib.request
+import zlib
 from collections import Counter, defaultdict, OrderedDict
+
+try:
+    import zstandard  # optional: only needed to decode a zstd-compressed module (§3, task 0035)
+except ImportError:  # pragma: no cover - exercised by whichever environment lacks it
+    zstandard = None
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 SWORD_DIR = os.path.dirname(HERE)
@@ -53,6 +61,22 @@ CONVERTERS = {
 }
 VERSIFICATION_JSON = os.path.join(REPO, 'scripts', 'data', 'kjv-versification.json')
 MT_MAP_JSON = os.path.join(SWORD_DIR, 'data', 'versification-mt-to-kjv.json')
+# name -> module_uuid mapping a reconversion must reuse (task 0035 requirement 5;
+# scripts/lib/module-identity.js's loadUuidMap()/saveUuidMap() read/write the same file).
+UUID_MAP_JSON = os.path.join(REPO, 'scripts', 'data', 'module-uuid-map.json')
+
+# The canonical content digest's ContentShape per type (design §2.5's CONTENT_MAP) —
+# mirrored, not imported: see scripts/lib/content-digest.js's doc comment for why
+# this repo cannot import packages/core/src/Data/Format/ModuleFormat.ts's CONTENT_MAP.
+# Scoped to the five types this repo converts (task 0035's "Out of scope").
+CONTENT_MAP = {
+    'bible': [{'table': 'bible_verse', 'rowid': 'verse_id', 'prose': [], 'indexed': ['text']}],
+    'commentary': [{'table': 'commentary_entry', 'rowid': 'entry_id', 'prose': ['content'], 'indexed': ['content']}],
+    'dictionary': [{'table': 'dictionary_entry', 'rowid': 'entry_id',
+                    'prose': ['definition', 'usage_notes'], 'indexed': ['word', 'definition', 'usage_notes']}],
+    'book': [{'table': 'book_section', 'rowid': 'section_id', 'prose': ['content'], 'indexed': ['title', 'content']}],
+    'devotional': [{'table': 'devotional_entry', 'rowid': 'entry_id', 'prose': ['content'], 'indexed': ['title', 'content']}],
+}
 VALIDATOR = os.path.join(REPO, 'scripts', 'modules', 'validate-module.js')
 OVERRIDES_JSON = os.path.join(SWORD_DIR, 'data', 'versification-overrides.json')
 
@@ -534,6 +558,118 @@ def open_db(path):
     return con
 
 
+def decode_cell(raw, compression, dictionary):
+    """
+    Decode one prose cell (design §3.2). `raw` is whatever sqlite3 handed back:
+    a `str` (open_db()'s text_factory already decoded a TEXT-stored cell —
+    stored as plain text regardless of the module's codec, per the keep-only-
+    if-smaller rule) or `bytes` (a BLOB-stored codec frame, text_factory does
+    not touch BLOB columns).
+    """
+    if raw is None:
+        return ''
+    if isinstance(raw, str):
+        return raw
+    if compression == 'deflate':
+        d = zlib.decompressobj(-15, zdict=dictionary or b'')
+        return (d.decompress(raw) + d.flush()).decode('utf-8')
+    if compression == 'zstd':
+        if zstandard is None:
+            raise RuntimeError("this module has zstd-compressed content but the 'zstandard' package is not installed")
+        dctx = (zstandard.ZstdDecompressor(dict_data=zstandard.ZstdCompressionDict(dictionary))
+                if dictionary else zstandard.ZstdDecompressor())
+        return dctx.decompress(raw).decode('utf-8')
+    # A BLOB cell under compression='none' is not a conforming file; report it
+    # as best-effort text rather than crashing the batch over one bad module.
+    return raw.decode('utf-8', 'replace')
+
+
+def compute_content_sha256(con, module_type, compression='none', dictionary=None):
+    """
+    The canonical content digest (design §2.7) — mirrors content-digest.js and
+    content_digest.cpp exactly (see CONTENT_MAP's doc comment above); this is
+    the THIRD independent implementation of the same formula, in the THIRD
+    language the pipeline uses, which is itself part of what proves the codec
+    path end to end (task 0035 requirement 6 / design §6.3).
+    """
+    shapes = CONTENT_MAP.get(module_type)
+    if not shapes:
+        raise ValueError(f"compute_content_sha256: no ContentShape for module type {module_type!r}")
+
+    h = hashlib.sha256()
+    for shape in shapes:
+        cols = shape['indexed']  # prose ∪ indexed, declared order == indexed's order (see content-digest.js)
+        col_list = ', '.join(f'"{c}"' for c in [shape['rowid']] + list(cols))
+        for row in con.execute(f'SELECT {col_list} FROM "{shape["table"]}" ORDER BY "{shape["rowid"]}" ASC'):
+            h.update(struct.pack('<Q', row[0]))
+            for i, col in enumerate(cols):
+                raw = row[i + 1]
+                if raw is None:
+                    h.update(b'\x00')
+                    continue
+                decoded = decode_cell(raw, compression, dictionary) if col in shape['prose'] else (
+                    raw if isinstance(raw, str) else raw.decode('utf-8', 'replace'))
+                encoded = decoded.encode('utf-8')
+                h.update(b'\x01')
+                h.update(struct.pack('<Q', len(encoded)))
+                h.update(encoded)
+        h.update(b'\x1e')
+    return h.hexdigest()
+
+
+def load_uuid_map():
+    if not os.path.exists(UUID_MAP_JSON):
+        return {}
+    with open(UUID_MAP_JSON, encoding='utf-8') as f:
+        return json.load(f)
+
+
+def check_v2_contract(F, con, mi, tables, module_name):
+    """
+    The checks task 0035 / design §6.3 adds on top of what this harness
+    already verified: format_version, no fts5 table, dictionary iff
+    compressed, and (when this module has a recorded uuid) that reconversion
+    kept it. content_sha256 is checked by the caller, which already has the
+    compression/dictionary values this function derives.
+
+    Returns (compression, dictionary_blob_or_None) for the caller to reuse.
+    """
+    fv = mi.get('format_version')
+    if fv != '0.2':
+        F.add('error', 'format_version', f"module_info.format_version = {fv!r}, expected '0.2' (design §2.6)")
+
+    fts_tables = sorted(t for t in tables if t.endswith('_fts'))
+    if fts_tables:
+        F.add('error', 'fts5_table_present',
+              f"v0.2 modules MUST carry no FTS5 table (design §2.3): found {', '.join(fts_tables)}")
+
+    compression = mi.get('compression') or 'none'
+    dictionary = None
+    if 'compression_dictionary' in tables:
+        dict_count = con.execute('SELECT COUNT(*) FROM compression_dictionary').fetchone()[0]
+        dict_row = con.execute('SELECT dict_blob FROM compression_dictionary WHERE codec = ?', (compression,)).fetchone()
+        if compression == 'none' and dict_count > 0:
+            F.add('error', 'unexpected_compression_dictionary',
+                  f"compression_dictionary has {dict_count} row(s) but module_info.compression is 'none' (§2.2)")
+        elif compression != 'none' and not dict_row:
+            F.add('error', 'missing_compression_dictionary',
+                  f"module_info.compression = {compression!r} but compression_dictionary has no row for it (§2.8)")
+        if dict_row:
+            raw = dict_row[0]
+            dictionary = raw if isinstance(raw, (bytes, bytearray)) else raw.encode('utf-8') if raw else None
+    elif compression != 'none':
+        F.add('error', 'missing_compression_dictionary',
+              f"module_info.compression = {compression!r} but this module has no compression_dictionary table (§2.2)")
+
+    expected_uuid = load_uuid_map().get(module_name)
+    if expected_uuid and mi.get('module_uuid') != expected_uuid:
+        F.add('error', 'uuid_mismatch',
+              f"module_info.module_uuid = {mi.get('module_uuid')!r} but the recorded mapping for "
+              f"{module_name!r} is {expected_uuid!r} — a reconversion MUST reuse the existing uuid (§6.2)")
+
+    return compression, dictionary
+
+
 def run_validator(db_path):
     if not os.path.exists(VALIDATOR) or not shutil.which('node'):
         return {'skipped': 'node or validate-module.js not available'}
@@ -792,6 +928,12 @@ def verify_bible(zip_path, db_path, log_path=None, reference_db=None, catalog_ro
     dup_adjacent = cur.execute(
         'SELECT a.verse_id, b.verse_id, a.text FROM bible_verse a JOIN bible_verse b '
         'ON b.verse_id = a.verse_id + 1 AND a.text = b.text AND length(a.text) > 20').fetchall()
+    # v0.2 contract checks + the canonical digest (task 0035 requirement 6 /
+    # design §6.3) — computed here, while `db` is still open; consumed lower
+    # down where the metadata section already lives.
+    v2_compression, v2_dictionary = check_v2_contract(F, db, mi, tables, report['module'])
+    content_sha256_recomputed = compute_content_sha256(db, 'bible', v2_compression, v2_dictionary)
+    size_bytes = os.path.getsize(db_path)
     db.close()
 
     # --- counts ------------------------------------------------------------------
@@ -1182,14 +1324,16 @@ def verify_bible(zip_path, db_path, log_path=None, reference_db=None, catalog_ro
     # --- metadata -------------------------------------------------------------------
     meta = OrderedDict((k, mi.get(k)) for k in (
         'abbreviation', 'full_name', 'language_code', 'right_to_left', 'license_spdx', 'license_url',
-        'versification', 'content_version', 'content_sha256', 'is_original_language'))
-    h = hashlib.sha256()
-    for verse_id, (text, _, _) in db_rows.items():
-        h.update(f'{verse_id}\t{text}\n'.encode('utf-8'))
-    meta['content_sha256_matches'] = (h.hexdigest() == mi.get('content_sha256'))
+        'versification', 'content_version', 'content_sha256', 'is_original_language', 'compression'))
+    # The canonical digest (design §2.7), computed earlier while the DB was
+    # still open — see check_v2_contract()'s call site above.
+    meta['content_sha256_recomputed'] = content_sha256_recomputed
+    meta['content_sha256_matches'] = (content_sha256_recomputed == mi.get('content_sha256'))
+    meta['size_bytes'] = size_bytes
     report['metadata'] = meta
+    report['size'] = {'bytes': size_bytes}
     if not meta['content_sha256_matches']:
-        F.add('error', 'content_sha256', 'module_info.content_sha256 does not match the verse text')
+        F.add('error', 'content_sha256', 'module_info.content_sha256 does not match the recomputed digest (design §2.7)')
     if not mi.get('license_spdx'):
         F.add('warn', 'license_unknown', 'module_info.license_spdx is empty (treated as restricted)')
     # Licence text that contradicts the SPDX id: THOT's ShortCopyright says
@@ -1306,20 +1450,49 @@ def verify_generic(zip_path, db_path, module_type, log_path=None, catalog_row=No
     report['conversion_log'] = parse_convert_log(log_path)
     table, column = CONTENT_COLUMNS[module_type]
     db = open_db(db_path)
+    tables = {r[0] for r in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
     cols = [r[1] for r in db.execute(f'PRAGMA table_info({table})')]
     if column not in cols:
         F.add('error', 'content_column', f'{table}.{column} missing (columns: {cols})')
         report['findings'] = F.items
         report['status'] = F.status()
         return report
+
+    mi = {}
+    try:
+        cur = db.execute('SELECT * FROM module_info WHERE info_id = 1')
+        mi_cols = [d[0] for d in cur.description]
+        mi_row = cur.fetchone()
+        mi = dict(zip(mi_cols, mi_row)) if mi_row else {}
+    except sqlite3.Error as exc:
+        F.add('error', 'module_info', f'module_info unreadable: {exc}')
+    compression, dictionary = check_v2_contract(F, db, mi, tables, report['module'])
+
     key_col = next((c for c in ('title', 'headword', 'term', 'entry_key', 'key', 'section_title', 'date_key',
                                 'reference', 'verse_id_start') if c in cols), cols[0])
-    rows = db.execute(f'SELECT rowid, {key_col}, {column} FROM {table}').fetchall()
-    links = db.execute('SELECT COUNT(*) FROM verse_link').fetchone()[0] if 'verse_link' in {
-        r[0] for r in db.execute("SELECT name FROM sqlite_master WHERE type='table'")} else None
+    raw_rows = db.execute(f'SELECT rowid, {key_col}, {column} FROM {table}').fetchall()
+    # Decode-aware: `column` may hold a compressed BLOB (§3.2). Decoding here,
+    # once, is what keeps every downstream check below (word counts, hygiene
+    # scan, samples) working unchanged on compressed modules instead of
+    # silently operating on raw bytes (or never matching anything).
+    rows = [(rowid, key, decode_cell(content, compression, dictionary)) for rowid, key, content in raw_rows]
+
+    content_sha256_recomputed = compute_content_sha256(db, module_type, compression, dictionary)
+    size_bytes = os.path.getsize(db_path)
+
+    links = db.execute('SELECT COUNT(*) FROM verse_link').fetchone()[0] if 'verse_link' in tables else None
     db.close()
     report['counts'] = {'source_entries': len(recs), 'source_nonempty': src_nonempty, 'db_rows': len(rows),
                         'verse_links': links}
+    report['metadata'] = OrderedDict((k, mi.get(k)) for k in (
+        'abbreviation', 'full_name', 'language_code', 'license_spdx', 'versification',
+        'content_version', 'content_sha256', 'compression'))
+    report['metadata']['content_sha256_recomputed'] = content_sha256_recomputed
+    report['metadata']['content_sha256_matches'] = (content_sha256_recomputed == mi.get('content_sha256'))
+    report['metadata']['size_bytes'] = size_bytes
+    report['size'] = {'bytes': size_bytes}
+    if not report['metadata']['content_sha256_matches']:
+        F.add('error', 'content_sha256', 'module_info.content_sha256 does not match the recomputed digest (design §2.7)')
     if not rows:
         F.add('error', 'empty', 'no rows converted')
     elif src_nonempty and len(rows) < 0.8 * src_nonempty:
@@ -1535,7 +1708,7 @@ def process_module(row, work, reference_db, keep_db, reconvert, run_validate):
                'versification': row.get('versification_sword'), 'markup': row.get('source_markup'),
                'language': row.get('app_language_code'), 'licence': row.get('conversion_license_verdict'),
                'status': 'ERROR', 'stage': '', 'codes': '', 'verses': '', 'exact_ratio': '', 'red_src': '',
-               'red_db': '', 'seconds': 0}
+               'red_db': '', 'seconds': 0, 'size_bytes': '', 'compression': ''}
     t0 = time.time()
     zip_path = os.path.join(work, 'cache', slug(row['repository']), os.path.basename(row['zip_download_url']))
     db_path = os.path.join(work, 'db', db_name(row))
@@ -1582,6 +1755,11 @@ def process_module(row, work, reference_db, keep_db, reconvert, run_validate):
         else:
             rep = verify_generic(zip_path, db_path, t, log_path, row, run_validate=run_validate)
             summary['verses'] = rep.get('counts', {}).get('db_rows', '')
+        # Size report row (task 0035 requirement 6 / design §6.3): every
+        # verify_bible/verify_generic report carries `size` and
+        # `metadata.compression` once check_v2_contract() has run.
+        summary['size_bytes'] = rep.get('size', {}).get('bytes', '')
+        summary['compression'] = rep.get('metadata', {}).get('compression', '')
         write_report(rep, out_dir)
         summary['status'] = rep['status']
         summary['codes'] = ' '.join(sorted({f['code'] for f in rep['findings'] if f['severity'] != 'info'}))
@@ -1597,7 +1775,8 @@ def process_module(row, work, reference_db, keep_db, reconvert, run_validate):
 
 
 SUMMARY_FIELDS = ['module_id', 'repository', 'type', 'status', 'codes', 'verses', 'exact_ratio', 'red_src',
-                  'red_db', 'versification', 'markup', 'language', 'licence', 'stage', 'seconds']
+                  'red_db', 'versification', 'markup', 'language', 'licence', 'stage', 'seconds',
+                  'size_bytes', 'compression']
 
 
 def write_summary(work, rows):
@@ -1704,6 +1883,70 @@ def cmd_summary(args):
     print(os.path.join(work, 'summary.md'))
 
 
+def check_codec_invariance(zip_path, module_type, module=None, versification_override=None, codecs=('none', 'deflate', 'zstd')):
+    """
+    Converts the SAME module once per codec in `codecs` and asserts
+    module_info.content_sha256 is identical every time (task 0035 requirement
+    6 / design §6.3: "content_sha256 recomputed ... identical for the same
+    module converted with none, deflate and zstd. One number proves the
+    codec path end to end.").
+
+    Opt-in (the `verify` subcommand's --check-codecs) rather than run on
+    every module in a batch: it converts the module up to 3x, which is not
+    something a full-library batch should pay by default. sword2bible is
+    skipped even if module_type == 'bible' and asked for — bible verse text
+    is never compressed (§3.4), so there is nothing to compare there.
+
+    Returns a list of finding dicts (empty = passed).
+    """
+    findings = []
+    if module_type == 'bible':
+        return [{'severity': 'info', 'code': 'codec_check_skipped',
+                 'message': 'bible verse text is never compressed (§3.4); nothing to compare'}]
+
+    conv = CONVERTERS.get(module_type)
+    if not conv or not os.path.exists(conv):
+        return [{'severity': 'warn', 'code': 'codec_check_skipped', 'message': f'no converter for {module_type}'}]
+
+    with tempfile.TemporaryDirectory(prefix='codec-check-') as tmp:
+        digests = {}
+        for codec in codecs:
+            db_path = os.path.join(tmp, f'{codec}.db')
+            cmd = [conv, '-i', zip_path, '-o', db_path, '--codec', codec]
+            if module:
+                cmd += ['--module', module]
+            if versification_override:
+                cmd += ['--versification', versification_override]
+            p = subprocess.run(cmd, capture_output=True, timeout=1800)
+            if p.returncode != 0:
+                findings.append({'severity': 'error', 'code': 'codec_check_convert_failed',
+                                 'message': f'--codec={codec} failed: {p.stderr.decode("utf-8", "replace")[:300]}'})
+                continue
+            con = open_db(db_path)
+            row = con.execute('SELECT content_sha256, compression FROM module_info WHERE info_id = 1').fetchone()
+            con.close()
+            if not row or not row[0]:
+                findings.append({'severity': 'error', 'code': 'codec_check_no_digest',
+                                 'message': f'--codec={codec}: module_info.content_sha256 is empty'})
+                continue
+            digests[codec] = row[0]
+            if row[1] != codec and not (codec == 'none' and row[1] == 'none'):
+                # A module too small to meet the threshold with --codec=deflate/zstd
+                # forced should still HONOUR the override (§3.4: "a --codec= /
+                # --compress flag overrides it per module") — if it silently fell
+                # back to 'none' anyway, that override isn't working.
+                findings.append({'severity': 'error', 'code': 'codec_check_override_ignored',
+                                 'message': f'--codec={codec} but module_info.compression = {row[1]!r}'})
+
+        distinct = set(digests.values())
+        if len(distinct) > 1:
+            findings.append({'severity': 'error', 'code': 'codec_check_digest_mismatch',
+                             'message': f'content_sha256 differs across codecs: {digests}'})
+        elif len(digests) < len([c for c in codecs]):
+            pass  # already reported per-codec above
+    return findings
+
+
 def cmd_verify(args):
     catalog_row = None
     if args.catalog:
@@ -1715,6 +1958,11 @@ def cmd_verify(args):
     else:
         rep = verify_generic(args.zip, args.db, args.type, args.log, catalog_row, args.module, args.seed,
                              not args.no_validate)
+    if args.check_codecs:
+        codec_findings = check_codec_invariance(args.zip, args.type, args.module, args.versification)
+        rep['findings'] = rep.get('findings', []) + codec_findings
+        sev = {f['severity'] for f in rep['findings']}
+        rep['status'] = 'FAIL' if 'error' in sev else ('WARN' if 'warn' in sev else 'PASS')
     out = args.out or os.path.join(os.path.dirname(os.path.abspath(args.db)), 'reports',
                                    slug(rep['module']))
     write_report(rep, out)
@@ -1826,6 +2074,9 @@ def main(argv=None):
     p.add_argument('--versification', help='the override the module was converted with (sword2bible --versification)')
     p.add_argument('--seed', type=int, default=1)
     p.add_argument('--no-validate', action='store_true')
+    p.add_argument('--check-codecs', action='store_true',
+                   help='reconvert with --codec=none/deflate/zstd and assert content_sha256 is identical '
+                        '(design §6.3); not run by default because it converts the module up to 3x')
     p.set_defaults(func=cmd_verify)
 
     p = sub.add_parser('probe', help='show verses side by side: SWORD raw/html/plain and the DB row')

@@ -49,6 +49,9 @@
 
 // Common library
 #include "sword_common.h"
+#include "schema_bridge.h"
+#include "compression.h"
+#include "content_digest.h"
 
 namespace fs = std::filesystem;
 using namespace sword;
@@ -285,6 +288,20 @@ private:
     // paragraph. See OsisVerseResult::trailingParagraphMarker.
     bool carryParagraphStart = false;
 
+    // Bible verse text is never compressed (design §3.4: "Ids and structure"
+    // is wrong for bible — it's actually "value doesn't clear the bar": a 132
+    // byte verse isn't worth a frame). codecName stays "none" for this
+    // converter; the member exists so module_info.compression is written
+    // uniformly across all five converters via the same code path.
+    std::string codecName = SwordCommon::CODEC_NONE;
+
+    // Requirement 5 (task 0035): reuse an existing module_uuid on
+    // reconversion instead of minting a fresh one. Empty = mint one as
+    // before (deterministicUuid()).
+    std::string uuidOverride;
+
+    int interlinearCount = 0;
+
 public:
     BibleConverter(const std::string& input, const std::string& output)
         : inputZip(input), outputDb(output) {}
@@ -299,6 +316,10 @@ public:
 
     void setVersificationOverride(const std::string& name) {
         versificationOverride = name;
+    }
+
+    void setUuidOverride(const std::string& uuid) {
+        uuidOverride = uuid;
     }
 
     bool isBookInRange(int bookNumber) const {
@@ -429,107 +450,41 @@ private:
             return false;
         }
 
-        // NOTE: no search tables are created here — the live search index
-        // lives in main.db.
-        const char* schema = R"SQL(
-            -- Bible verses (clean text + structured spans)
-            CREATE TABLE bible_verse (
-                verse_id INTEGER PRIMARY KEY,
-                text TEXT NOT NULL,
-                formatting TEXT,
-                word_count INTEGER,
-                metadata TEXT,
-                CHECK (verse_id > 0)
-            );
+        // Schema (module_info, bible_verse, interlinear_word, module_feature,
+        // compression_dictionary, verse_link — no FTS, no text_plain, no
+        // redundant indexes: none of that is written here any more, it comes
+        // from whatever the Bible repo's own Bible.sql currently says) is
+        // loaded from the Bible repo, not hand-copied (task 0035 / design
+        // §6.1 — see schema_bridge.h). The live search index lives in
+        // main.db, never in the module file.
+        if (!executeSql(SwordCommon::loadRepoSchema("Bible.sql"))) {
+            std::cerr << "Failed to create schema from Bible.sql" << std::endl;
+            return false;
+        }
 
-            -- Interlinear words (word offsets are 0-based, inclusive)
-            CREATE TABLE interlinear_word (
-                interlinear_id INTEGER PRIMARY KEY AUTOINCREMENT,
-                verse_id INTEGER NOT NULL,
-                word_position_start INTEGER NOT NULL,
-                word_position_end INTEGER NOT NULL,
-                original_word TEXT,
-                transliteration TEXT,
-                strongs_number TEXT,
-                morphology TEXT,
-                lemma TEXT,
-                gloss TEXT,
-                extra_word_positions TEXT,
-                metadata TEXT,
-                FOREIGN KEY (verse_id) REFERENCES bible_verse(verse_id) ON DELETE CASCADE,
-                CHECK (word_position_start >= 0),
-                CHECK (word_position_end >= word_position_start)
-            );
-            CREATE INDEX idx_interlinear_verse ON interlinear_word(verse_id);
-            CREATE INDEX idx_interlinear_strongs ON interlinear_word(strongs_number);
-            CREATE INDEX idx_interlinear_morphology ON interlinear_word(morphology);
-            CREATE INDEX idx_interlinear_position ON interlinear_word(verse_id, word_position_start);
-
-            -- Full-text search over the canonical text
-            -- Column 0 is the key (UNINDEXED), column 1 is the searchable text.
-            -- That ordering is load-bearing: callers address columns positionally
-            -- via highlight()/snippet() (see BibleRepository.searchVersesWithHighlighting).
-            CREATE VIRTUAL TABLE bible_verse_fts USING fts5(
-                verse_id UNINDEXED,
-                text,
-                content='bible_verse',
-                content_rowid='verse_id',
-                tokenize='porter unicode61'
-            );
-
-            -- FTS triggers (external-content tables need the 'delete'
-            -- command form; a plain UPDATE/DELETE leaves stale terms behind)
-            CREATE TRIGGER bible_verse_fts_insert AFTER INSERT ON bible_verse BEGIN
-                INSERT INTO bible_verse_fts(rowid, verse_id, text)
-                VALUES (new.verse_id, new.verse_id, new.text);
-            END;
-
-            CREATE TRIGGER bible_verse_fts_delete AFTER DELETE ON bible_verse BEGIN
-                INSERT INTO bible_verse_fts(bible_verse_fts, rowid, verse_id, text)
-                VALUES('delete', old.verse_id, old.verse_id, old.text);
-            END;
-
-            CREATE TRIGGER bible_verse_fts_update AFTER UPDATE ON bible_verse BEGIN
-                INSERT INTO bible_verse_fts(bible_verse_fts, rowid, verse_id, text)
-                VALUES('delete', old.verse_id, old.verse_id, old.text);
-                INSERT INTO bible_verse_fts(rowid, verse_id, text)
-                VALUES (new.verse_id, new.verse_id, new.text);
-            END;
-
-            -- Module features
-            CREATE TABLE module_feature (
-                feature_id INTEGER PRIMARY KEY AUTOINCREMENT,
-                feature_name TEXT NOT NULL UNIQUE,
-                is_enabled INTEGER DEFAULT 1,
-                metadata TEXT,
-                CHECK (is_enabled IN (0, 1))
-            );
-
-            -- Schema version
-            CREATE TABLE schema_version (
+        // schema_version is this repo's own build-provenance bookkeeping,
+        // not part of the module format schema — IF NOT EXISTS so it is
+        // harmless whether or not Bible.sql also declares one.
+        if (!executeSql(R"SQL(
+            CREATE TABLE IF NOT EXISTS schema_version (
                 version_id INTEGER PRIMARY KEY AUTOINCREMENT,
                 version_number TEXT NOT NULL,
                 applied_date TEXT DEFAULT CURRENT_TIMESTAMP,
                 notes TEXT,
                 metadata TEXT
             );
-
-            INSERT INTO schema_version (version_number, notes)
-            VALUES ('0.1.0', 'Bible translation module schema');
-        )SQL";
-
-        if (!executeSql(SwordCommon::MODULE_INFO_SCHEMA_SQL)) {
-            std::cerr << "Failed to create module_info" << std::endl;
+        )SQL")) {
             return false;
         }
-
-        if (!executeSql(schema)) {
-            return false;
-        }
-
-        // One verse_link table, identical in every module database.
-        if (!executeSql(SwordCommon::VERSE_LINK_SCHEMA_SQL)) {
-            return false;
+        {
+            sqlite3_stmt* stmt = nullptr;
+            const char* sql = "INSERT INTO schema_version (version_number, notes) VALUES (?, ?)";
+            if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) == SQLITE_OK) {
+                sqlite3_bind_text(stmt, 1, SwordCommon::FORMAT_VERSION, -1, SQLITE_STATIC);
+                sqlite3_bind_text(stmt, 2, "Bible translation module schema", -1, SQLITE_STATIC);
+                sqlite3_step(stmt);
+                sqlite3_finalize(stmt);
+            }
         }
 
         std::cout << "    Database schema created" << std::endl;
@@ -630,8 +585,11 @@ private:
         preferRawOsis = (sourceType == "osis" || sourceType.empty());
 
         // Identity that survives content revisions — never include
-        // Version or the content hash here.
-        moduleInfo.uuid = SwordCommon::deterministicUuid(
+        // Version or the content hash here. --uuid overrides this (task 0035
+        // requirement 5): a reconverted module reuses its existing uuid
+        // instead of minting a fresh one, via the name -> uuid mapping in
+        // scripts/data/module-uuid-map.json.
+        moduleInfo.uuid = !uuidOverride.empty() ? uuidOverride : SwordCommon::deterministicUuid(
             "bible:" + SwordCommon::toLower(moduleInfo.abbreviation) + ":" +
             SwordCommon::toLower(moduleInfo.languageCode));
 
@@ -1108,8 +1066,8 @@ private:
                 abbreviation, full_name, language_code, year_published,
                 copyright, license_spdx, license_url, source_url,
                 description, publisher, is_original_language, right_to_left,
-                versification, content_version, metadata
-            ) VALUES (1, ?, 'bible', 'bible-module', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                versification, content_version, metadata, compression
+            ) VALUES (1, ?, 'bible', 'bible-module', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         )SQL";
 
         sqlite3_stmt* stmt = nullptr;
@@ -1142,6 +1100,7 @@ private:
         bindText(stmt, i++, SwordCommon::VERSIFICATION);            // versification
         bindTextOrNull(stmt, i++, moduleInfo.contentVersion);       // content_version
         bindTextOrNull(stmt, i++, moduleInfo.metadataJson);         // metadata
+        bindText(stmt, i++, codecName);                             // compression (always 'none' for bible — §3.4)
 
         bool success = (sqlite3_step(stmt) == SQLITE_DONE);
         if (!success) {
@@ -1184,7 +1143,7 @@ private:
 
         int verseCount = 0;
         int duplicateCount = 0;
-        int interlinearCount = 0;
+        interlinearCount = 0; // class member: read after convertVerses() to decide whether to keep interlinear_word
         std::set<int64_t> seenVerses;
 
         (*vk) = sword::TOP;
@@ -1572,27 +1531,75 @@ private:
      * invisible to it. This converter is the only stage that sees the source's
      * real book names, so it writes them down.
      */
-    bool finalizeContentHash() {
-        std::string content;
-        content.reserve(8u * 1024u * 1024u);
+    /**
+     * Drop interlinear_word when the source had none (task 0035 requirement
+     * 2: "no interlinear_word table unless the source has interlinear
+     * data"), and write module_feature rows from what the data actually
+     * shows (requirement 4; design §2.4).
+     */
+    bool finalizeFeatures() {
+        if (interlinearCount == 0) {
+            if (!executeSql("DROP TABLE IF EXISTS interlinear_word;")) return false;
+        } else {
+            insertModuleFeature("interlinear");
 
-        sqlite3_stmt* select = nullptr;
-        if (sqlite3_prepare_v2(db, "SELECT verse_id, text FROM bible_verse ORDER BY verse_id",
-                               -1, &select, nullptr) != SQLITE_OK) {
-            std::cerr << "Failed to read verses for hashing: " << sqlite3_errmsg(db) << std::endl;
+            sqlite3_stmt* stmt = nullptr;
+            if (sqlite3_prepare_v2(db,
+                    "SELECT COUNT(*) FROM interlinear_word WHERE strongs_number IS NOT NULL AND strongs_number != ''",
+                    -1, &stmt, nullptr) == SQLITE_OK) {
+                if (sqlite3_step(stmt) == SQLITE_ROW && sqlite3_column_int64(stmt, 0) > 0) {
+                    insertModuleFeature("strongs_numbers");
+                }
+                sqlite3_finalize(stmt);
+            }
+
+            stmt = nullptr;
+            if (sqlite3_prepare_v2(db,
+                    "SELECT COUNT(*) FROM interlinear_word WHERE morphology IS NOT NULL AND morphology != ''",
+                    -1, &stmt, nullptr) == SQLITE_OK) {
+                if (sqlite3_step(stmt) == SQLITE_ROW && sqlite3_column_int64(stmt, 0) > 0) {
+                    insertModuleFeature("morphology");
+                }
+                sqlite3_finalize(stmt);
+            }
+        }
+
+        sqlite3_stmt* stmt = nullptr;
+        if (sqlite3_prepare_v2(db,
+                "SELECT COUNT(*) FROM bible_verse WHERE formatting LIKE '%\"words_of_christ\"%'",
+                -1, &stmt, nullptr) == SQLITE_OK) {
+            if (sqlite3_step(stmt) == SQLITE_ROW && sqlite3_column_int64(stmt, 0) > 0) {
+                insertModuleFeature("words_of_christ");
+            }
+            sqlite3_finalize(stmt);
+        }
+
+        return true;
+    }
+
+    /** INSERT OR IGNORE so a feature can safely be checked/inserted more than once. */
+    bool insertModuleFeature(const std::string& featureName) {
+        sqlite3_stmt* stmt = nullptr;
+        const char* sql = "INSERT OR IGNORE INTO module_feature (feature_name) VALUES (?)";
+        if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) != SQLITE_OK) return false;
+        sqlite3_bind_text(stmt, 1, featureName.c_str(), -1, SQLITE_TRANSIENT);
+        bool ok = (sqlite3_step(stmt) == SQLITE_DONE);
+        sqlite3_finalize(stmt);
+        return ok;
+    }
+
+    bool finalizeContentHash() {
+        if (!finalizeFeatures()) {
+            std::cerr << "Failed to finalize module_feature / interlinear_word" << std::endl;
             return false;
         }
-        while (sqlite3_step(select) == SQLITE_ROW) {
-            const int64_t verseId = sqlite3_column_int64(select, 0);
-            const unsigned char* text = sqlite3_column_text(select, 1);
-            content += std::to_string(verseId);
-            content += '\t';
-            if (text) content += reinterpret_cast<const char*>(text);
-            content += '\n';
-        }
-        sqlite3_finalize(select);
 
-        const std::string hash = SwordCommon::sha256Hex(content);
+        // Canonical, codec-invariant digest (design §2.7). bible.prose is
+        // empty — `text` is never compressed (§3.4) — so this is a plain
+        // read, but goes through the shared helper anyway so every converter
+        // computes content_sha256 the same way.
+        const std::string hash = SwordCommon::computeContentSha256(
+            db, "bible_verse", "verse_id", {"text"}, /*proseColumns=*/{}, codecName, {});
 
         // Rebuild the metadata blob now that we know which books were present.
         std::ostringstream metaJson;
@@ -1836,6 +1843,10 @@ void printUsage(const char* programName) {
     std::cout << "                 .conf declares. For modules whose text is numbered in a" << std::endl;
     std::cout << "                 different system than declared; see" << std::endl;
     std::cout << "                 tools/import/sword/data/versification-overrides.json." << std::endl;
+    std::cout << "  --codec none   Only 'none' is valid here: Bible verse text is never" << std::endl;
+    std::cout << "                 compressed (design §3.4). Accepted for a uniform CLI." << std::endl;
+    std::cout << "  --uuid UUID    Reuse this module_uuid instead of minting a fresh one" << std::endl;
+    std::cout << "                 (reconversion; see scripts/data/module-uuid-map.json)." << std::endl;
     std::cout << "  --help, -h     Show this help message" << std::endl;
     std::cout << std::endl;
     std::cout << "Examples:" << std::endl;
@@ -1874,12 +1885,28 @@ int main(int argc, char* argv[]) {
     std::string rangeStr;
     bool allowVersification = false;
     std::string versificationOverride;
+    std::string codec = SwordCommon::CODEC_NONE;
+    std::string uuidOverride;
 
     // Parse command line arguments
     for (int i = 1; i < argc; i++) {
         std::string arg = argv[i];
 
-        if (arg == "--allow-versification") {
+        if (arg == "--codec") {
+            if (i + 1 < argc) {
+                codec = argv[++i];
+            } else {
+                std::cerr << "Error: --codec requires a value (none|deflate|zstd)" << std::endl;
+                return 1;
+            }
+        } else if (arg == "--uuid") {
+            if (i + 1 < argc) {
+                uuidOverride = argv[++i];
+            } else {
+                std::cerr << "Error: --uuid requires a value" << std::endl;
+                return 1;
+            }
+        } else if (arg == "--allow-versification") {
             allowVersification = true;
         } else if (arg == "--versification") {
             if (i + 1 < argc) {
@@ -1932,10 +1959,20 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
+    // Bible verse text is never compressed (design §3.4: "Ids and structure"
+    // — verse text is excluded by TYPE, not by size). --codec is accepted for
+    // a uniform CLI across all five converters, but only 'none' is valid here.
+    if (codec != SwordCommon::CODEC_NONE) {
+        std::cerr << "Error: --codec=" << codec << " is not valid for sword2bible; "
+                  << "Bible verse text is never compressed (design §3.4)." << std::endl;
+        return 1;
+    }
+
     // Run conversion
     BibleConverter converter(inputFile, outputFile);
     converter.setAllowForeignVersification(allowVersification);
     converter.setVersificationOverride(versificationOverride);
+    converter.setUuidOverride(uuidOverride);
 
     // Set book range filter if specified
     if (!rangeStr.empty()) {

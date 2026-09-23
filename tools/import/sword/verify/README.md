@@ -13,12 +13,37 @@ as a disagreement instead of being copied into both sides of the comparison.
 ## Build
 
 ```bash
-sudo apt-get install -y build-essential libsword-dev libsqlite3-dev libzip-dev
+sudo apt-get install -y build-essential libsword-dev libsqlite3-dev libzip-dev zlib1g-dev
 for d in common bible commentary dictionary book devotional probe; do make -C tools/import/sword/$d; done
 npm install          # optional: lets swordcheck also run scripts/modules/validate-module.js
 ```
 
-Python 3 standard library only.
+Python 3 standard library, plus the optional `zstandard` package (`pip install zstandard`) to
+decode a zstd-compressed module's content for the fidelity/hygiene checks and the digest
+recompute below — without it, `swordcheck` still runs, but a zstd module's compressed cells
+can't be read back for those specific checks (a clear error is raised instead of silently
+mis-reading them).
+
+## Module format v0.2 (task 0035)
+
+On top of the checks this tool already ran, every conversion is now also checked for:
+`module_info.format_version == '0.2'`; no FTS5 table in the file (the sidecar index replaces
+it, built at install — design §2.3); `compression_dictionary` present if and only if
+`module_info.compression != 'none'`; the canonical `content_sha256` (design §2.7) recomputed
+from the finished file and compared against the stored value; and, when
+`scripts/data/module-uuid-map.json` has a recorded uuid for the module, that
+`module_info.module_uuid` matches it (a reconversion must reuse the existing uuid). Content
+stored as a compressed BLOB is decoded before the fidelity/hygiene checks run against it, so
+those checks work the same whether or not the module is compressed.
+
+`verify --check-codecs` reconverts the module once per codec (none/deflate/zstd) and asserts
+`content_sha256` is identical across all of them — the one check that proves the codec path
+end to end. Opt-in, not run by `batch`, because it converts the module up to 3x:
+
+```bash
+python3 swordcheck.py verify --zip commentary_scofield.zip --db commentary_scofield.db \
+  --type commentary --check-codecs
+```
 
 ## Commands
 

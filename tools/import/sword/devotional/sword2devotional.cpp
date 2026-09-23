@@ -38,12 +38,20 @@
 
 // Common library
 #include "sword_common.h"
+#include "schema_bridge.h"
+#include "compression.h"
+#include "content_digest.h"
 
 namespace fs = std::filesystem;
 using namespace sword;
 
 // Global database handle
 static sqlite3* db = nullptr;
+
+// --codec/--compress and --uuid (task 0035 requirements 3 and 5).
+static std::string g_codecOverride;
+static std::string g_uuidOverride;
+static SwordCommon::CompressionOutcome g_compression;
 
 // The identity block, kept so finalisation can record the content hash.
 static SwordCommon::ModuleIdentity g_identity;
@@ -98,6 +106,10 @@ int main(int argc, char* argv[]) {
         } else if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0) {
             printUsage(argv[0]);
             return 0;
+        } else if ((strcmp(argv[i], "--codec") == 0 || strcmp(argv[i], "--compress") == 0) && i + 1 < argc) {
+            g_codecOverride = argv[++i];
+        } else if (strcmp(argv[i], "--uuid") == 0 && i + 1 < argc) {
+            g_uuidOverride = argv[++i];
         }
     }
 
@@ -196,99 +208,43 @@ bool createDatabase(const std::string& dbPath) {
         return false;
     }
 
-    // Create schema
-    const char* schema = R"SQL(
-        -- Type-specific columns, as in the Bible repo's Devotional.sql.
-        ALTER TABLE module_info ADD COLUMN devotional_type TEXT NOT NULL DEFAULT 'continuous'
-            CHECK (devotional_type IN ('day_of_year', 'fixed_length', 'continuous'));
-        ALTER TABLE module_info ADD COLUMN total_days INTEGER;
+    // Schema (module_info + devotional_type/total_days, devotional_entry,
+    // module_feature, compression_dictionary, verse_link — no FTS, no
+    // redundant indexes) is loaded from the Bible repo, not hand-copied
+    // (task 0035 / design §6.1 — see schema_bridge.h).
+    char* errMsg = nullptr;
+    std::string schema = SwordCommon::loadRepoSchema("Devotional.sql");
+    if (sqlite3_exec(db, schema.c_str(), nullptr, nullptr, &errMsg) != SQLITE_OK) {
+        std::cerr << "Failed to create schema from Devotional.sql: " << (errMsg ? errMsg : "(unknown)") << "\n";
+        sqlite3_free(errMsg);
+        return false;
+    }
 
-        -- Devotional entries.
-        -- Parsed scripture references belong in verse_link.
-        -- `scripture_reference` is the display string exactly as the author
-        -- wrote it.
-        -- sort_order is explicit because day_number is nullable for
-        -- devotional_type='continuous'.
-        CREATE TABLE devotional_entry (
-            entry_id INTEGER PRIMARY KEY AUTOINCREMENT,
-            day_number INTEGER,
-            sort_order INTEGER NOT NULL DEFAULT 0,
-            date_label TEXT,
-            title TEXT,
-            content TEXT NOT NULL,
-            scripture_reference TEXT,
-            scripture_text TEXT,
-            author_note TEXT,
-            metadata TEXT,
-            UNIQUE(day_number)
-        );
-
-        CREATE INDEX idx_devotional_day ON devotional_entry(day_number);
-        CREATE INDEX idx_devotional_date ON devotional_entry(date_label);
-        CREATE INDEX idx_devotional_sort ON devotional_entry(sort_order);
-
-        -- Full-text search
-        -- Column 0 is the key (UNINDEXED); searchable columns follow. That
-        -- ordering is load-bearing for positional highlight()/snippet() calls.
-        CREATE VIRTUAL TABLE devotional_entry_fts USING fts5(
-            entry_id UNINDEXED,
-            title,
-            content,
-            content='devotional_entry',
-            content_rowid='entry_id',
-            tokenize='porter unicode61'
-        );
-
-        -- FTS triggers (an external-content table needs the 'delete'
-        -- command form; a plain UPDATE/DELETE leaves stale terms in the index)
-        CREATE TRIGGER devotional_entry_fts_insert AFTER INSERT ON devotional_entry BEGIN
-            INSERT INTO devotional_entry_fts(rowid, entry_id, title, content)
-            VALUES (new.entry_id, new.entry_id, new.title, new.content);
-        END;
-
-        CREATE TRIGGER devotional_entry_fts_delete AFTER DELETE ON devotional_entry BEGIN
-            INSERT INTO devotional_entry_fts(devotional_entry_fts, rowid, entry_id, title, content)
-            VALUES('delete', old.entry_id, old.entry_id, old.title, old.content);
-        END;
-
-        CREATE TRIGGER devotional_entry_fts_update AFTER UPDATE ON devotional_entry BEGIN
-            INSERT INTO devotional_entry_fts(devotional_entry_fts, rowid, entry_id, title, content)
-            VALUES('delete', old.entry_id, old.entry_id, old.title, old.content);
-            INSERT INTO devotional_entry_fts(rowid, entry_id, title, content)
-            VALUES (new.entry_id, new.entry_id, new.title, new.content);
-        END;
-
-        -- Schema version
-        CREATE TABLE schema_version (
+    // schema_version is this repo's own build-provenance bookkeeping, not
+    // part of the module format schema — IF NOT EXISTS so it is harmless
+    // whether or not Devotional.sql also declares one.
+    if (sqlite3_exec(db, R"SQL(
+        CREATE TABLE IF NOT EXISTS schema_version (
             version_id INTEGER PRIMARY KEY AUTOINCREMENT,
             version_number TEXT NOT NULL,
             applied_date TEXT DEFAULT CURRENT_TIMESTAMP,
             notes TEXT,
             metadata TEXT
         );
-
-        INSERT INTO schema_version (version_number, notes)
-        VALUES ('0.1.0', 'Devotional module schema');
-    )SQL";
-
-    char* errMsg = nullptr;
-    if (sqlite3_exec(db, SwordCommon::MODULE_INFO_SCHEMA_SQL, nullptr, nullptr, &errMsg) != SQLITE_OK) {
-        std::cerr << "Failed to create module_info: " << (errMsg ? errMsg : "(unknown)") << "\n";
+    )SQL", nullptr, nullptr, &errMsg) != SQLITE_OK) {
+        std::cerr << "Failed to create schema_version: " << (errMsg ? errMsg : "(unknown)") << "\n";
         sqlite3_free(errMsg);
         return false;
     }
-
-    if (sqlite3_exec(db, schema, nullptr, nullptr, &errMsg) != SQLITE_OK) {
-        std::cerr << "Failed to create schema: " << (errMsg ? errMsg : "(unknown)") << "\n";
-        sqlite3_free(errMsg);
-        return false;
-    }
-
-    // One verse_link table, identical in every module database.
-    if (sqlite3_exec(db, SwordCommon::VERSE_LINK_SCHEMA_SQL, nullptr, nullptr, &errMsg) != SQLITE_OK) {
-        std::cerr << "Failed to create verse_link: " << (errMsg ? errMsg : "(unknown)") << "\n";
-        sqlite3_free(errMsg);
-        return false;
+    {
+        sqlite3_stmt* stmt = nullptr;
+        if (sqlite3_prepare_v2(db, "INSERT INTO schema_version (version_number, notes) VALUES (?, ?)",
+                               -1, &stmt, nullptr) == SQLITE_OK) {
+            sqlite3_bind_text(stmt, 1, SwordCommon::FORMAT_VERSION, -1, SQLITE_STATIC);
+            sqlite3_bind_text(stmt, 2, "Devotional module schema", -1, SQLITE_STATIC);
+            sqlite3_step(stmt);
+            sqlite3_finalize(stmt);
+        }
     }
 
     return true;
@@ -368,8 +324,8 @@ bool insertModuleInfo(const SwordCommon::ModuleIdentity& identity,
             abbreviation, full_name, author, publisher, year_published,
             copyright, license_spdx, license_url, source_url, description,
             language_code, devotional_type, total_days,
-            versification, content_version, metadata
-        ) VALUES (1, ?, 'devotional', 'devotional-module', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            versification, content_version, metadata, compression
+        ) VALUES (1, ?, 'devotional', 'devotional-module', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     )SQL";
 
     sqlite3_stmt* stmt = nullptr;
@@ -378,8 +334,11 @@ bool insertModuleInfo(const SwordCommon::ModuleIdentity& identity,
         return false;
     }
 
+    // --uuid overrides the minted identity (task 0035 requirement 5).
+    const std::string uuid = !g_uuidOverride.empty() ? g_uuidOverride : identity.uuid;
+
     int i = 1;
-    sqlite3_bind_text(stmt, i++, identity.uuid.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(stmt, i++, uuid.c_str(), -1, SQLITE_TRANSIENT);
     sqlite3_bind_text(stmt, i++, SwordCommon::FORMAT_VERSION, -1, SQLITE_STATIC);
     sqlite3_bind_text(stmt, i++, identity.abbreviation.c_str(), -1, SQLITE_TRANSIENT);
     sqlite3_bind_text(stmt, i++, identity.fullName.c_str(), -1, SQLITE_TRANSIENT);
@@ -409,6 +368,7 @@ bool insertModuleInfo(const SwordCommon::ModuleIdentity& identity,
     sqlite3_bind_text(stmt, i++, SwordCommon::VERSIFICATION, -1, SQLITE_STATIC);
     bindTextOrNull(stmt, i++, identity.contentVersion);
     bindTextOrNull(stmt, i++, identity.metadataJson);
+    sqlite3_bind_text(stmt, i++, SwordCommon::CODEC_NONE, -1, SQLITE_STATIC); // compression: set for real by finalizeModuleInfo()
 
     bool success = (sqlite3_step(stmt) == SQLITE_DONE);
     if (!success) {
@@ -420,34 +380,33 @@ bool insertModuleInfo(const SwordCommon::ModuleIdentity& identity,
 }
 
 /**
- * Record the content hash and correct total_days from the real entry
- * count (the value inserted earlier was only an estimate from the description).
+ * Compress (if eligible), record the canonical content digest, and correct
+ * total_days from the real entry count (the value inserted earlier was only
+ * an estimate from the description).
  */
 bool finalizeModuleInfo() {
-    std::string content;
-    content.reserve(2u * 1024u * 1024u);
+    // devotional.prose = ['content'] only (design §2.5's CONTENT_MAP).
+    g_compression = SwordCommon::applyCompression(db, "devotional_entry", {"content"}, g_codecOverride);
+    std::cout << "  Compression: " << g_compression.codec;
+    if (g_compression.codec != SwordCommon::CODEC_NONE) {
+        std::cout << " (" << g_compression.rowsCompressed << " rows compressed, "
+                  << g_compression.dictionary.size() << "-byte dictionary)";
+    }
+    std::cout << "\n";
+
     int entryCount = 0;
-
-    sqlite3_stmt* select = nullptr;
-    if (sqlite3_prepare_v2(db,
-            "SELECT day_number, date_label, content FROM devotional_entry ORDER BY sort_order",
-            -1, &select, nullptr) != SQLITE_OK) {
-        return false;
+    {
+        sqlite3_stmt* countStmt = nullptr;
+        if (sqlite3_prepare_v2(db, "SELECT COUNT(*) FROM devotional_entry", -1, &countStmt, nullptr) == SQLITE_OK) {
+            if (sqlite3_step(countStmt) == SQLITE_ROW) entryCount = static_cast<int>(sqlite3_column_int64(countStmt, 0));
+            sqlite3_finalize(countStmt);
+        }
     }
-    while (sqlite3_step(select) == SQLITE_ROW) {
-        entryCount++;
-        content += std::to_string(sqlite3_column_int(select, 0));
-        content += '\t';
-        const unsigned char* label = sqlite3_column_text(select, 1);
-        if (label) content += reinterpret_cast<const char*>(label);
-        content += '\t';
-        const unsigned char* body = sqlite3_column_text(select, 2);
-        if (body) content += reinterpret_cast<const char*>(body);
-        content += '\n';
-    }
-    sqlite3_finalize(select);
 
-    const std::string hash = SwordCommon::sha256Hex(content);
+    // Canonical, codec-invariant digest (design §2.7).
+    const std::string hash = SwordCommon::computeContentSha256(
+        db, "devotional_entry", "entry_id", {"title", "content"}, {"content"},
+        g_compression.codec, g_compression.dictionary);
 
     sqlite3_stmt* stmt = nullptr;
     if (sqlite3_prepare_v2(db,
@@ -584,6 +543,11 @@ void printUsage(const char* programName) {
     std::cout << "Options:\n";
     std::cout << "  --input, -i   Input SWORD module ZIP file\n";
     std::cout << "  --output, -o  Output SQLite database file\n";
+    std::cout << "  --codec, --compress none|deflate|zstd\n";
+    std::cout << "                Override the publisher default (deflate if >=8MB decoded\n";
+    std::cout << "                prose, else none; design §3.4).\n";
+    std::cout << "  --uuid UUID   Reuse this module_uuid instead of minting a fresh one\n";
+    std::cout << "                (reconversion; see scripts/data/module-uuid-map.json).\n";
     std::cout << "  --help, -h    Show this help message\n\n";
     std::cout << "Example:\n";
     std::cout << "  " << programName << " --input SME.zip --output devotional_spurgeon_morning.db\n";

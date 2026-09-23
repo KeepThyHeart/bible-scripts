@@ -7,6 +7,7 @@
 sword2bible
 book/sword2book
 devotional/sword2devotional
+common/selftest
 *.o
 *.a
 

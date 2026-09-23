@@ -65,6 +65,8 @@ const {
   MAIN_DB_PATH: DEFAULT_MAIN_DB,
   KJV_VERSIFICATION_JSON: VERSIFICATION_PATH,
 } = require('../lib/paths');
+const codec = require('../lib/codec');
+const { CONTENT_MAP: DIGEST_CONTENT_MAP, computeContentSha256 } = require('../lib/content-digest');
 
 const MAX_BOOK_NUMBER = 66;
 
@@ -119,7 +121,17 @@ const REQUIRED_INFO_COLUMNS = [
   'format', 'format_version', 'content_version', 'content_sha256',
   'versification',
   'license_spdx', 'source_url',
+  'compression', // design §2.1 — v0.2 adds this; the column existing is required of
+                 // every module this validator sees, only its VALUE is version-gated below.
 ];
+
+/** The exact format_version string this validator applies the v0.2 rules to. */
+const V2_FORMAT_VERSION = '0.2';
+
+/** Known codec vocabulary. Open set by design (§2.1: "no CHECK, expected to grow") — an
+ * unrecognised value is a warning here, never an error, so this validator doesn't have
+ * to be updated in lockstep with every future codec. */
+const KNOWN_CODECS = new Set(['none', 'deflate', 'zstd']);
 
 /**
  * FTS5 shape contract: for each content table, column 0 of its `_fts` table must
@@ -386,6 +398,7 @@ async function checkModuleInfo(db, tableNames, result) {
     language_code: row.language_code ?? null,
     module_uuid: row.module_uuid ?? null,
     versification: row.versification ?? null,
+    format_version: row.format_version ?? null,
   };
 
   // `module_uuid` MUST be present and a valid UUID — it, not
@@ -431,13 +444,43 @@ async function checkModuleInfo(db, tableNames, result) {
 }
 
 /**
- * Verify the FTS5 tables have the declared column order.
+ * Verify the FTS5 tables have the declared column order (pre-v0.2), or that
+ * NONE exist at all (v0.2: design §2.3 deletes every FTS5 table and trigger
+ * — the sidecar index replaces it, built at install, never shipped in the
+ * module file).
  *
- * Only tables that actually exist are checked: a module legitimately ships FTS
- * only for the content it has. `content=`/`content_rowid=` options do not appear
- * in pragma_table_info, so the check is on the visible column list.
+ * Only tables that actually exist are checked (pre-v0.2 branch): a module
+ * legitimately ships FTS only for the content it has. `content=`/
+ * `content_rowid=` options do not appear in pragma_table_info, so the check
+ * is on the visible column list.
  */
-async function checkFtsShape(db, tableNames, result) {
+async function checkFtsShape(db, tableNames, result, isV2) {
+  if (isV2) {
+    const present = Object.values(FTS_SHAPE).map(s => s.fts).filter(fts => tableNames.has(fts));
+    if (present.length) {
+      result.errors.push(err(
+        'fts5_table_present',
+        `v0.2 modules MUST carry no FTS5 table (design §2.3 — the sidecar index replaces it, ` +
+        `built at install): found ${present.join(', ')}.`
+      ));
+    }
+    // A v0.2 file with an fts5 table under some OTHER name would slip past the
+    // check above; sqlite_master's own module column catches that generically.
+    let virtualTables;
+    try {
+      virtualTables = await dbAll(db,
+        "SELECT name FROM sqlite_master WHERE type = 'table' AND sql LIKE '%VIRTUAL TABLE%fts5%'");
+    } catch { virtualTables = []; }
+    const unexpected = virtualTables.map(r => r.name).filter(n => !present.includes(n));
+    if (unexpected.length) {
+      result.errors.push(err(
+        'fts5_table_present',
+        `v0.2 modules MUST carry no FTS5 table (design §2.3): found ${unexpected.join(', ')}.`
+      ));
+    }
+    return;
+  }
+
   for (const [contentTable, { fts, key }] of Object.entries(FTS_SHAPE)) {
     if (!tableNames.has(contentTable) || !tableNames.has(fts)) continue;
 
@@ -461,6 +504,78 @@ async function checkFtsShape(db, tableNames, result) {
 }
 
 /**
+ * v0.2 compression + digest checks (design §2.8, task 0035 requirement 7):
+ *   - compression_dictionary row present iff module_info.compression != 'none'.
+ *   - content_sha256 recomputed from the finished file equals the stored value
+ *     (the canonical, codec-invariant digest — design §2.7).
+ *
+ * Returns `{ compression, dictionary, proseColumns }` — or null when there is
+ * nothing to check — so checkContentSanity() can reuse the same compression
+ * info instead of re-querying it.
+ */
+async function checkCompressionAndDigest(db, tableNames, moduleType, result, isV2) {
+  if (!tableNames.has('module_info')) return null;
+
+  const info = await dbGet(db, 'SELECT compression, content_sha256 FROM module_info WHERE info_id = 1');
+  if (!info) return null;
+
+  const compression = info.compression || 'none';
+
+  if (isV2 && compression !== 'none' && !KNOWN_CODECS.has(compression)) {
+    result.warnings.push(err('unknown_codec',
+      `\`module_info.compression\` = ${JSON.stringify(compression)} is not one this validator ` +
+      `recognises (${[...KNOWN_CODECS].join('/')}). The codec vocabulary is open by design (§2.1); ` +
+      `this is a warning, not an error, so a new codec doesn't need this file changed first.`));
+  }
+
+  let dictionary = null;
+  if (tableNames.has('compression_dictionary')) {
+    const dictRow = await dbGet(db, 'SELECT dict_blob FROM compression_dictionary WHERE codec = ?', [compression]);
+    const dictCount = await dbGet(db, 'SELECT COUNT(*) AS cnt FROM compression_dictionary');
+
+    if (isV2) {
+      if (compression === 'none' && dictCount && dictCount.cnt > 0) {
+        result.errors.push(err('unexpected_compression_dictionary',
+          `\`compression_dictionary\` has ${dictCount.cnt} row(s) but \`module_info.compression\` ` +
+          `is 'none'; a row exists if and only if the frames were encoded against a dictionary (§2.2).`));
+      } else if (compression !== 'none' && !dictRow) {
+        result.errors.push(err('missing_compression_dictionary',
+          `\`module_info.compression\` = '${compression}' but \`compression_dictionary\` has no row ` +
+          `for it; a dictionary row is required whenever compression != 'none' (§2.8).`));
+      }
+    }
+    dictionary = dictRow ? dictRow.dict_blob : null;
+  } else if (isV2 && compression !== 'none') {
+    result.errors.push(err('missing_compression_dictionary',
+      `\`module_info.compression\` = '${compression}' but this module has no \`compression_dictionary\` ` +
+      `table at all (§2.2, §2.8).`));
+  }
+
+  const shapes = DIGEST_CONTENT_MAP[moduleType];
+  if (shapes && info.content_sha256) {
+    let recomputed;
+    try {
+      recomputed = await computeContentSha256(db, moduleType, { compression, dictionary });
+    } catch (e) {
+      result.errors.push(err('digest_recompute_failed',
+        `Could not recompute content_sha256: ${e.message}`));
+      recomputed = null;
+    }
+    if (recomputed !== null && recomputed !== info.content_sha256) {
+      result.errors.push(err('content_sha256_mismatch',
+        `\`module_info.content_sha256\` = ${info.content_sha256} but the recomputed digest is ` +
+        `${recomputed}; the stored value no longer matches the file's own content (design §2.7).`));
+    }
+  }
+
+  const proseColumns = new Set();
+  if (shapes) {
+    for (const shape of shapes) for (const c of shape.prose) proseColumns.add(c);
+  }
+  return { compression, dictionary, proseColumns };
+}
+
+/**
  * Look inside the module: is the primary text column actually text?
  *
  * Two independent signals, because either alone gives false positives:
@@ -470,22 +585,57 @@ async function checkFtsShape(db, tableNames, result) {
  * Reported as an ERROR past the threshold and a WARNING below it, so a module
  * with a handful of genuinely terse entries is not failed outright.
  */
-async function checkContentSanity(db, tableNames, moduleType, result) {
+async function checkContentSanity(db, tableNames, moduleType, result, compressionInfo) {
   const spec = CONTENT_COLUMNS[moduleType];
   if (!spec || !tableNames.has(spec.table)) return;
 
   const { table, column, minChars } = spec;
+  const compression = compressionInfo && compressionInfo.compression;
+  const isProse = compressionInfo && compressionInfo.proseColumns && compressionInfo.proseColumns.has(column);
 
   let stats;
-  try {
-    stats = await dbGet(db, `
-      SELECT COUNT(*) AS total,
-             SUM(CASE WHEN ${column} IS NULL OR length(trim(${column})) < ${minChars} THEN 1 ELSE 0 END) AS short,
-             SUM(CASE WHEN ${column} LIKE '%' || char(65533) || '%' THEN 1 ELSE 0 END) AS nontext
-        FROM ${table}
-    `);
-  } catch {
-    return; // column absent: not this check's business
+  if (compression && compression !== 'none' && isProse) {
+    // Decode-aware path: the column may hold a compressed BLOB (§3.2), so a
+    // plain SQL LIKE/length() over the raw bytes would either mis-measure
+    // (byte length, not char length) or simply never match — silently
+    // turning this whole check into a no-op for every compressed module,
+    // which is the "content scan no longer reports content_corrupt" bug
+    // task 0035's acceptance criteria call out by name.
+    let rows;
+    try {
+      rows = await dbAll(db, `SELECT "${column}" AS value FROM "${table}"`);
+    } catch {
+      return;
+    }
+    if (!rows.length) return;
+
+    let short = 0;
+    let nontext = 0;
+    for (const row of rows) {
+      let text;
+      try {
+        text = await codec.decodeAsync(compression, row.value, compressionInfo.dictionary);
+      } catch (e) {
+        // A cell that fails to decode is exactly the corruption this check
+        // exists to catch — count it, don't let the decode error hide it.
+        nontext++;
+        continue;
+      }
+      if (text === null || text === undefined || text.trim().length < minChars) short++;
+      if (typeof text === 'string' && text.includes('�')) nontext++;
+    }
+    stats = { total: rows.length, short, nontext };
+  } else {
+    try {
+      stats = await dbGet(db, `
+        SELECT COUNT(*) AS total,
+               SUM(CASE WHEN ${column} IS NULL OR length(trim(${column})) < ${minChars} THEN 1 ELSE 0 END) AS short,
+               SUM(CASE WHEN ${column} LIKE '%' || char(65533) || '%' THEN 1 ELSE 0 END) AS nontext
+          FROM ${table}
+      `);
+    } catch {
+      return; // column absent: not this check's business
+    }
   }
   if (!stats || !stats.total) return;
 
@@ -676,7 +826,20 @@ const REQUIRED_VERSE_LINK_INDEXES = [
   'idx_verse_link_covering',
 ];
 
-async function checkVerseLinkShape(db, tableNames, result) {
+/**
+ * v0.2 drops `idx_verse_link_start` (design §2.3: it is a strict prefix of
+ * `idx_verse_link_range` and therefore redundant once the covering pair
+ * exists). "F11 must change with it" — this is that change, gated on
+ * format_version so a v0.1 file already in the wild isn't failed for
+ * carrying the index the format used to require.
+ */
+const V2_REQUIRED_VERSE_LINK_INDEXES = [
+  'idx_verse_link_source',
+  'idx_verse_link_range',
+  'idx_verse_link_covering',
+];
+
+async function checkVerseLinkShape(db, tableNames, result, isV2) {
   if (!tableNames.has('verse_link')) return; // reported separately by checkRequiredTables
 
   let indexRows;
@@ -685,10 +848,12 @@ async function checkVerseLinkShape(db, tableNames, result) {
       "SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'verse_link'");
   } catch { indexRows = []; }
   const indexNames = new Set(indexRows.map(r => r.name));
-  const missingIndexes = REQUIRED_VERSE_LINK_INDEXES.filter(i => !indexNames.has(i));
+  const required = isV2 ? V2_REQUIRED_VERSE_LINK_INDEXES : REQUIRED_VERSE_LINK_INDEXES;
+  const missingIndexes = required.filter(i => !indexNames.has(i));
   if (missingIndexes.length) {
     result.errors.push(err('missing_verse_link_index',
-      `\`verse_link\` is missing required index(es): ${missingIndexes.join(', ')} (all four are part of the contract).`));
+      `\`verse_link\` is missing required index(es): ${missingIndexes.join(', ')} ` +
+      `(${required.length} are part of the ${isV2 ? 'v0.2' : 'pre-v0.2'} contract).`));
   }
 
   let nullEnd;
@@ -968,12 +1133,15 @@ async function validateModule(dbPath, options = {}) {
     }
 
     await checkModuleInfo(db, tableNames, result);
+    const isV2 = !!(result.info && result.info.format_version === V2_FORMAT_VERSION);
+
     await checkRequiredTables(db, tableNames, result);
-    await checkVerseLinkShape(db, tableNames, result);
-    await checkFtsShape(db, tableNames, result);
+    await checkVerseLinkShape(db, tableNames, result, isV2);
+    await checkFtsShape(db, tableNames, result, isV2);
     await checkForbiddenSpellings(db, tableNames, result);
     await checkRangeSanity(db, tableNames, result);
-    await checkContentSanity(db, tableNames, result.moduleType, result);
+    const compressionInfo = await checkCompressionAndDigest(db, tableNames, result.moduleType, result, isV2);
+    await checkContentSanity(db, tableNames, result.moduleType, result, compressionInfo);
     await checkBibleText(db, tableNames, result);
     await checkBibleFormatting(db, tableNames, result);
 

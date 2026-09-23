@@ -42,3 +42,29 @@ function loadSchema(name) {
 }
 
 module.exports = { loadSchema };
+
+// ============================================================================
+// CLI: prints one schema's expanded DDL to stdout.
+//
+// This is the bridge the C++ converters use (task 0035 / design §6.1): rather
+// than hand-copying the DDL (the gap this repo's own README names), each
+// converter shells out to `node scripts/lib/schema.js <Name.sql>` and
+// executes whatever comes back on stdout. It is the exact same `loadSchema`
+// this file already uses for the Node importers (import-tsk.js) — the CLI
+// wrapper is the only new part, so a C++ and a Node converter can never see
+// different DDL for the same schema file.
+// ============================================================================
+
+if (require.main === module) {
+  const name = process.argv[2];
+  if (!name) {
+    console.error('Usage: node scripts/lib/schema.js <SchemaFile.sql>  (e.g. Bible.sql, Commentary.sql)');
+    process.exit(2);
+  }
+  try {
+    process.stdout.write(loadSchema(name));
+  } catch (e) {
+    console.error(`schema.js: ${e.message}`);
+    process.exit(1);
+  }
+}

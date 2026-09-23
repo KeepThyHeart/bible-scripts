@@ -38,12 +38,20 @@
 
 // Common library
 #include "sword_common.h"
+#include "schema_bridge.h"
+#include "compression.h"
+#include "content_digest.h"
 
 namespace fs = std::filesystem;
 using namespace sword;
 
 // Global database handle
 static sqlite3* db = nullptr;
+
+// --codec/--compress and --uuid (task 0035 requirements 3 and 5).
+static std::string g_codecOverride;
+static std::string g_uuidOverride;
+static SwordCommon::CompressionOutcome g_compression;
 
 // The identity block, kept so finalisation can rebuild metadata without needing
 // SQLite's JSON1 extension.
@@ -83,6 +91,10 @@ int main(int argc, char* argv[]) {
         } else if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0) {
             printUsage(argv[0]);
             return 0;
+        } else if ((strcmp(argv[i], "--codec") == 0 || strcmp(argv[i], "--compress") == 0) && i + 1 < argc) {
+            g_codecOverride = argv[++i];
+        } else if (strcmp(argv[i], "--uuid") == 0 && i + 1 < argc) {
+            g_uuidOverride = argv[++i];
         }
     }
 
@@ -205,117 +217,44 @@ bool createDatabase(const std::string& dbPath) {
         return false;
     }
 
-    // Create schema
-    const char* schema = R"SQL(
-        -- Type-specific columns, as in the Bible repo's Dictionary.sql.
-        -- dictionary_type is an open set: no CHECK, validated at the repository boundary.
-        ALTER TABLE module_info ADD COLUMN dictionary_type TEXT NOT NULL DEFAULT 'bible_dictionary';
-        ALTER TABLE module_info ADD COLUMN language_from TEXT;
-        ALTER TABLE module_info ADD COLUMN language_to TEXT DEFAULT 'en';
+    // Schema (module_info + dictionary_type/language_from/language_to,
+    // dictionary_entry, word_occurrence, module_feature,
+    // compression_dictionary, verse_link — no FTS, no redundant indexes) is
+    // loaded from the Bible repo, not hand-copied (task 0035 / design §6.1 —
+    // see schema_bridge.h).
+    char* errMsg = nullptr;
+    std::string schema = SwordCommon::loadRepoSchema("Dictionary.sql");
+    if (sqlite3_exec(db, schema.c_str(), nullptr, nullptr, &errMsg) != SQLITE_OK) {
+        std::cerr << "Failed to create schema from Dictionary.sql: " << (errMsg ? errMsg : "(unknown)") << "\n";
+        sqlite3_free(errMsg);
+        return false;
+    }
 
-        -- Dictionary entries.
-        -- Scripture references belong in verse_link, where they are queryable, alongside every other
-        -- module type's.
-        CREATE TABLE dictionary_entry (
-            entry_id INTEGER PRIMARY KEY AUTOINCREMENT,
-            entry_key TEXT NOT NULL UNIQUE,
-            word TEXT,
-            transliteration TEXT,
-            pronunciation TEXT,
-            part_of_speech TEXT,
-            definition TEXT NOT NULL,
-            etymology TEXT,
-            usage_notes TEXT,
-            semantic_range TEXT,
-            related_words TEXT,
-            content_file TEXT,
-            metadata TEXT
-        );
-
-        CREATE INDEX idx_entry_key ON dictionary_entry(entry_key);
-        CREATE INDEX idx_entry_word ON dictionary_entry(word);
-
-        -- Where a lexicon entry is actually used in a given translation. SWORD
-        -- dictionaries carry no occurrence data, so this ships empty; it is part
-        -- of the published contract and is populated by Strong's-mapping tooling.
-        CREATE TABLE word_occurrence (
-            occurrence_id INTEGER PRIMARY KEY AUTOINCREMENT,
-            entry_key TEXT NOT NULL,
-            verse_id INTEGER NOT NULL,
-            bible_module_uuid TEXT,
-            translation_word TEXT,
-            metadata TEXT,
-
-            FOREIGN KEY (entry_key) REFERENCES dictionary_entry(entry_key) ON DELETE CASCADE
-        );
-
-        CREATE INDEX idx_occurrence_entry ON word_occurrence(entry_key);
-        CREATE INDEX idx_occurrence_verse ON word_occurrence(verse_id);
-
-        -- Full-text search
-        -- Columns 0-1 are the keys (UNINDEXED); searchable columns follow. That
-        -- ordering is load-bearing for positional highlight()/snippet() calls.
-        CREATE VIRTUAL TABLE dictionary_entry_fts USING fts5(
-            entry_id UNINDEXED,
-            entry_key UNINDEXED,
-            word,
-            definition,
-            usage_notes,
-            content='dictionary_entry',
-            content_rowid='entry_id',
-            tokenize='porter unicode61'
-        );
-
-        -- FTS triggers (an external-content table needs the 'delete'
-        -- command form; a plain UPDATE/DELETE leaves stale terms in the index)
-        CREATE TRIGGER dictionary_entry_fts_insert AFTER INSERT ON dictionary_entry BEGIN
-            INSERT INTO dictionary_entry_fts(rowid, entry_id, entry_key, word, definition, usage_notes)
-            VALUES (new.entry_id, new.entry_id, new.entry_key, new.word, new.definition, new.usage_notes);
-        END;
-
-        CREATE TRIGGER dictionary_entry_fts_delete AFTER DELETE ON dictionary_entry BEGIN
-            INSERT INTO dictionary_entry_fts(dictionary_entry_fts, rowid, entry_id, entry_key, word, definition, usage_notes)
-            VALUES('delete', old.entry_id, old.entry_id, old.entry_key, old.word, old.definition, old.usage_notes);
-        END;
-
-        CREATE TRIGGER dictionary_entry_fts_update AFTER UPDATE ON dictionary_entry BEGIN
-            INSERT INTO dictionary_entry_fts(dictionary_entry_fts, rowid, entry_id, entry_key, word, definition, usage_notes)
-            VALUES('delete', old.entry_id, old.entry_id, old.entry_key, old.word, old.definition, old.usage_notes);
-            INSERT INTO dictionary_entry_fts(rowid, entry_id, entry_key, word, definition, usage_notes)
-            VALUES (new.entry_id, new.entry_id, new.entry_key, new.word, new.definition, new.usage_notes);
-        END;
-
-        -- Schema version
-        CREATE TABLE schema_version (
+    // schema_version is this repo's own build-provenance bookkeeping, not
+    // part of the module format schema — IF NOT EXISTS so it is harmless
+    // whether or not Dictionary.sql also declares one.
+    if (sqlite3_exec(db, R"SQL(
+        CREATE TABLE IF NOT EXISTS schema_version (
             version_id INTEGER PRIMARY KEY AUTOINCREMENT,
             version_number TEXT NOT NULL,
             applied_date TEXT DEFAULT CURRENT_TIMESTAMP,
             notes TEXT,
             metadata TEXT
         );
-
-        INSERT INTO schema_version (version_number, notes)
-        VALUES ('0.1.0', 'Dictionary module schema');
-    )SQL";
-
-    char* errMsg = nullptr;
-    if (sqlite3_exec(db, SwordCommon::MODULE_INFO_SCHEMA_SQL, nullptr, nullptr, &errMsg) != SQLITE_OK) {
-        std::cerr << "Failed to create module_info: " << (errMsg ? errMsg : "(unknown)") << "\n";
+    )SQL", nullptr, nullptr, &errMsg) != SQLITE_OK) {
+        std::cerr << "Failed to create schema_version: " << (errMsg ? errMsg : "(unknown)") << "\n";
         sqlite3_free(errMsg);
         return false;
     }
-
-    if (sqlite3_exec(db, schema, nullptr, nullptr, &errMsg) != SQLITE_OK) {
-        std::cerr << "Failed to create schema: " << (errMsg ? errMsg : "(unknown)") << "\n";
-        sqlite3_free(errMsg);
-        return false;
-    }
-
-    // One verse_link table, identical in every module database.
-    if (sqlite3_exec(db, SwordCommon::VERSE_LINK_SCHEMA_SQL, nullptr, nullptr, &errMsg) != SQLITE_OK) {
-        std::cerr << "Failed to create verse_link: " << (errMsg ? errMsg : "(unknown)") << "\n";
-        sqlite3_free(errMsg);
-        return false;
+    {
+        sqlite3_stmt* stmt = nullptr;
+        if (sqlite3_prepare_v2(db, "INSERT INTO schema_version (version_number, notes) VALUES (?, ?)",
+                               -1, &stmt, nullptr) == SQLITE_OK) {
+            sqlite3_bind_text(stmt, 1, SwordCommon::FORMAT_VERSION, -1, SQLITE_STATIC);
+            sqlite3_bind_text(stmt, 2, "Dictionary module schema", -1, SQLITE_STATIC);
+            sqlite3_step(stmt);
+            sqlite3_finalize(stmt);
+        }
     }
 
     return true;
@@ -414,8 +353,8 @@ bool insertModuleInfo(const SwordCommon::ModuleIdentity& identity,
             abbreviation, full_name, dictionary_type, language_from, language_to,
             language_code, author, publisher, year_published, copyright,
             license_spdx, license_url, source_url, description,
-            content_version, metadata
-        ) VALUES (1, ?, 'dictionary', 'dictionary-module', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            content_version, metadata, compression
+        ) VALUES (1, ?, 'dictionary', 'dictionary-module', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     )SQL";
 
     sqlite3_stmt* stmt = nullptr;
@@ -424,8 +363,11 @@ bool insertModuleInfo(const SwordCommon::ModuleIdentity& identity,
         return false;
     }
 
+    // --uuid overrides the minted identity (task 0035 requirement 5).
+    const std::string uuid = !g_uuidOverride.empty() ? g_uuidOverride : identity.uuid;
+
     int i = 1;
-    sqlite3_bind_text(stmt, i++, identity.uuid.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(stmt, i++, uuid.c_str(), -1, SQLITE_TRANSIENT);
     sqlite3_bind_text(stmt, i++, SwordCommon::FORMAT_VERSION, -1, SQLITE_STATIC);
     sqlite3_bind_text(stmt, i++, identity.abbreviation.c_str(), -1, SQLITE_TRANSIENT);
     sqlite3_bind_text(stmt, i++, identity.fullName.c_str(), -1, SQLITE_TRANSIENT);
@@ -449,6 +391,7 @@ bool insertModuleInfo(const SwordCommon::ModuleIdentity& identity,
     bindTextOrNull(stmt, i++, identity.description);
     bindTextOrNull(stmt, i++, identity.contentVersion);
     bindTextOrNull(stmt, i++, identity.metadataJson);
+    sqlite3_bind_text(stmt, i++, SwordCommon::CODEC_NONE, -1, SQLITE_STATIC); // compression: set for real by finalizeModuleInfo()
 
     bool success = (sqlite3_step(stmt) == SQLITE_DONE);
     if (!success) {
@@ -559,26 +502,23 @@ bool insertEntry(const std::string& entryKey, const std::string& word,
  * Record the SHA-256 of the content we stored.
  */
 bool finalizeModuleInfo() {
-    std::string content;
-    content.reserve(4u * 1024u * 1024u);
-
-    sqlite3_stmt* select = nullptr;
-    if (sqlite3_prepare_v2(db,
-            "SELECT entry_key, definition FROM dictionary_entry ORDER BY entry_id",
-            -1, &select, nullptr) != SQLITE_OK) {
-        return false;
+    // Compress (design §3: eligible at >=8MB decoded prose across
+    // definition+usage_notes, or --codec/--compress overrides), THEN hash.
+    g_compression = SwordCommon::applyCompression(
+        db, "dictionary_entry", {"definition", "usage_notes"}, g_codecOverride);
+    std::cout << "  Compression: " << g_compression.codec;
+    if (g_compression.codec != SwordCommon::CODEC_NONE) {
+        std::cout << " (" << g_compression.rowsCompressed << " rows compressed, "
+                  << g_compression.dictionary.size() << "-byte dictionary)";
     }
-    while (sqlite3_step(select) == SQLITE_ROW) {
-        const unsigned char* key = sqlite3_column_text(select, 0);
-        const unsigned char* def = sqlite3_column_text(select, 1);
-        if (key) content += reinterpret_cast<const char*>(key);
-        content += '\t';
-        if (def) content += reinterpret_cast<const char*>(def);
-        content += '\n';
-    }
-    sqlite3_finalize(select);
+    std::cout << "\n";
 
-    const std::string hash = SwordCommon::sha256Hex(content);
+    // Canonical, codec-invariant digest (design §2.7). CONTENT_MAP's indexed
+    // set for dictionary is ['word','definition','usage_notes']; 'word' is
+    // never compressed (not in the prose set).
+    const std::string hash = SwordCommon::computeContentSha256(
+        db, "dictionary_entry", "entry_id", {"word", "definition", "usage_notes"},
+        {"definition", "usage_notes"}, g_compression.codec, g_compression.dictionary);
 
     const char* sql = "UPDATE module_info SET content_sha256 = ? WHERE info_id = 1";
     sqlite3_stmt* stmt = nullptr;
@@ -605,6 +545,11 @@ void printUsage(const char* programName) {
     std::cout << "Options:\n";
     std::cout << "  --input, -i   Input SWORD module ZIP file\n";
     std::cout << "  --output, -o  Output SQLite database file\n";
+    std::cout << "  --codec, --compress none|deflate|zstd\n";
+    std::cout << "                Override the publisher default (deflate if >=8MB decoded\n";
+    std::cout << "                prose, else none; design §3.4).\n";
+    std::cout << "  --uuid UUID   Reuse this module_uuid instead of minting a fresh one\n";
+    std::cout << "                (reconversion; see scripts/data/module-uuid-map.json).\n";
     std::cout << "  --help, -h    Show this help message\n\n";
     std::cout << "Examples:\n";
     std::cout << "  " << programName << " --input Webster1828.zip --output dictionary_webster.db\n";

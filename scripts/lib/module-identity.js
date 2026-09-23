@@ -12,9 +12,20 @@
  */
 
 const crypto = require('crypto');
+const fs = require('fs');
+const path = require('path');
 
 /** The module format (spec) version emitted by these converters. */
-const FORMAT_VERSION = '0.1';
+const FORMAT_VERSION = '0.2';
+/**
+ * Format versions a reader accepts, and the legacy strings tolerated during
+ * rollout — mirrors packages/core's ModuleFormat.ts (design §2.6). Not
+ * currently read by anything in this repo (the converters only ever WRITE
+ * FORMAT_VERSION); kept here so validate-module.js and the verify harness
+ * have one shared place to import the gate from instead of hand-copying it.
+ */
+const READABLE_FORMAT_VERSIONS = ['0.1', '0.2'];
+const LEGACY_FORMAT_VERSIONS = ['2.0'];
 /** The versification every module produced here conforms to. */
 const VERSIFICATION = 'kjv-english';
 
@@ -177,8 +188,80 @@ function verseLinkEnd(startId, endId) {
   return endId;
 }
 
+// ------------------------------------------------------------------
+// module_uuid mapping (name -> uuid), for reconversion (design §6.2)
+// ------------------------------------------------------------------
+
+/**
+ * A reconverted module must reuse its EXISTING module_uuid, not mint a fresh
+ * one: installed libraries, user highlights, notes and reading positions are
+ * keyed to it, so a fresh uuid on reconversion silently orphans all of that
+ * (design §6.2, "module_uuid is the one thing a reconversion can lose"). This
+ * mapping — module name -> uuid — is the record that makes reconversion
+ * idempotent on identity. It is a one-way door: whatever uuid a module has
+ * the FIRST time it goes through this map is the uuid it has forever after.
+ *
+ * File shape: a flat JSON object, `{ "<module name>": "<uuid>", ... }`. The
+ * key is the module's own name — the same string used as a filename stem
+ * (`commentary_scofield`, `bible_kjv`, ...), NOT the deterministicUuid()
+ * identity key (`commentary:scofield:en`) — because the name is what a human
+ * or a batch script has in hand when reconverting, and it is stable across a
+ * module being renamed on CrossWire's side as long as this repo doesn't
+ * rename its own output file.
+ */
+
+const DEFAULT_UUID_MAP_PATH = path.join(__dirname, '..', 'data', 'module-uuid-map.json');
+
+/** Load the uuid map. Returns {} if the file does not exist yet. */
+function loadUuidMap(mapPath = DEFAULT_UUID_MAP_PATH) {
+  if (!fs.existsSync(mapPath)) return {};
+  const raw = fs.readFileSync(mapPath, 'utf8').trim();
+  if (!raw) return {};
+  const parsed = JSON.parse(raw);
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+    throw new Error(`${mapPath}: expected a flat JSON object of {moduleName: uuid}`);
+  }
+  return parsed;
+}
+
+/** Persist the uuid map, sorted by key so diffs are reviewable. */
+function saveUuidMap(map, mapPath = DEFAULT_UUID_MAP_PATH) {
+  const sorted = {};
+  for (const key of Object.keys(map).sort()) sorted[key] = map[key];
+  fs.mkdirSync(path.dirname(mapPath), { recursive: true });
+  fs.writeFileSync(mapPath, `${JSON.stringify(sorted, null, 2)}\n`, 'utf8');
+}
+
+/**
+ * Resolve the uuid a converter should use for `moduleName`.
+ *
+ * Returns the recorded uuid if the map already has one; otherwise mints a
+ * fresh one from `identityKey` via deterministicUuid() and returns it WITHOUT
+ * writing it back — recording a newly minted uuid is a deliberate act
+ * (recordModuleUuid()), not a side effect of asking what uuid to use, so a
+ * dry run or a failed conversion never mutates the map.
+ *
+ * @param {Record<string,string>} map     as returned by loadUuidMap()
+ * @param {string} moduleName             e.g. "commentary_scofield"
+ * @param {string} identityKey            e.g. "commentary:scofield:en"
+ * @returns {{ uuid: string, isNew: boolean }}
+ */
+function resolveModuleUuid(map, moduleName, identityKey) {
+  const existing = map[moduleName];
+  if (existing) return { uuid: existing, isNew: false };
+  return { uuid: deterministicUuid(identityKey), isNew: true };
+}
+
+/** Record a (newly minted or reused) uuid for `moduleName`. Mutates `map`. */
+function recordModuleUuid(map, moduleName, uuid) {
+  map[moduleName] = uuid;
+  return map;
+}
+
 module.exports = {
   FORMAT_VERSION,
+  READABLE_FORMAT_VERSIONS,
+  LEGACY_FORMAT_VERSIONS,
   VERSIFICATION,
   sha256Hex,
   deterministicUuid,
@@ -188,4 +271,9 @@ module.exports = {
   extractYear,
   VERSE_LINK_INSERT_SQL,
   verseLinkEnd,
+  DEFAULT_UUID_MAP_PATH,
+  loadUuidMap,
+  saveUuidMap,
+  resolveModuleUuid,
+  recordModuleUuid,
 };

@@ -40,7 +40,7 @@ namespace fs = std::filesystem;
 namespace SwordCommon {
 
     /** The module format version emitted by these converters. */
-    extern const char* const FORMAT_VERSION;   // "0.1"
+    extern const char* const FORMAT_VERSION;   // "0.2"
     /** The canon every module produced here conforms to. */
     extern const char* const CANON;            // "protestant-66"
     /** The versification every module produced here conforms to. */
@@ -427,27 +427,14 @@ namespace SwordCommon {
     // ------------------------------------------------------------------
 
     /**
-     * The single verse-linking table emitted by every module type.
-     * Range convention: verse_id_start inclusive, verse_id_end inclusive
-     * and NOT NULL — a single verse is end = start, never NULL.
-     * Never start_verse_id / end_verse_id.
+     * Schema DDL (module_info, verse_link, module_feature,
+     * compression_dictionary and each type's own content tables) is no
+     * longer hand-copied here — see schema_bridge.h's loadRepoSchema(),
+     * which loads it from the Bible repo the same way
+     * scripts/lib/schema.js does for the Node importers (task 0035 / design
+     * §6.1). Each converter's createDatabase() calls it once with its own
+     * type's schema file name ("Bible.sql", "Commentary.sql", ...).
      */
-    extern const char* const VERSE_LINK_SCHEMA_SQL;
-
-    /**
-     * The `module_info` table shared by every module type. Type-specific
-     * columns (dictionary_type, devotional_type, ...) are added by each
-     * converter with ALTER TABLE, as in the Bible repo's schemas.
-     *
-     * NOTE: This DDL is a hand-maintained COPY of the Bible repo's
-     * packages/core/sql/schemas/shared/module_info.sql (and the per-type
-     * ALTERs in schemas/initial/*.sql). A copy drifts. Converters should load
-     * the Bible repo's schemas directly (expanding `-- @include` and dropping
-     * PRAGMAs), as scripts/lib/schema.js does for the Node importers. Until
-     * that is done, keep this in step with the Bible repo by hand.
-     * The same applies to VERSE_LINK_SCHEMA_SQL above.
-     */
-    extern const char* const MODULE_INFO_SCHEMA_SQL;
 
     /**
      * Insert one verse_link row.
