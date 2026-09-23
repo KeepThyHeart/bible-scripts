@@ -84,7 +84,7 @@ archive). What changed, mechanically:
 - **No more hand-copied DDL.** The converters used to carry their own copies
   of `module_info`, `verse_link` and each type's content tables — the exact
   gap this section used to describe. They now call
-  `SwordCommon::loadRepoSchema("Bible.sql")` (etc.), which shells out to
+  `SwordCommon::loadRepoSchema("BibleTranslation.sql")` (etc.), which shells out to
   `node scripts/lib/schema.js <Name.sql>` — the same `loadSchema()` the Node
   importers already used — so a C++ and a Node converter can never see
   different DDL for the same schema file. This needs a real `bible` repo

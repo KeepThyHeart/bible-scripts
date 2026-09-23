@@ -58,7 +58,7 @@ module.exports = { loadSchema };
 if (require.main === module) {
   const name = process.argv[2];
   if (!name) {
-    console.error('Usage: node scripts/lib/schema.js <SchemaFile.sql>  (e.g. Bible.sql, Commentary.sql)');
+    console.error('Usage: node scripts/lib/schema.js <SchemaFile.sql>  (e.g. BibleTranslation.sql, Commentary.sql)');
     process.exit(2);
   }
   try {

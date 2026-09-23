@@ -453,18 +453,18 @@ private:
         // Schema (module_info, bible_verse, interlinear_word, module_feature,
         // compression_dictionary, verse_link — no FTS, no text_plain, no
         // redundant indexes: none of that is written here any more, it comes
-        // from whatever the Bible repo's own Bible.sql currently says) is
+        // from whatever the Bible repo's own BibleTranslation.sql currently says) is
         // loaded from the Bible repo, not hand-copied (task 0035 / design
         // §6.1 — see schema_bridge.h). The live search index lives in
         // main.db, never in the module file.
-        if (!executeSql(SwordCommon::loadRepoSchema("Bible.sql"))) {
-            std::cerr << "Failed to create schema from Bible.sql" << std::endl;
+        if (!executeSql(SwordCommon::loadRepoSchema("BibleTranslation.sql"))) {
+            std::cerr << "Failed to create schema from BibleTranslation.sql" << std::endl;
             return false;
         }
 
         // schema_version is this repo's own build-provenance bookkeeping,
         // not part of the module format schema — IF NOT EXISTS so it is
-        // harmless whether or not Bible.sql also declares one.
+        // harmless whether or not BibleTranslation.sql also declares one.
         if (!executeSql(R"SQL(
             CREATE TABLE IF NOT EXISTS schema_version (
                 version_id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1566,10 +1566,14 @@ private:
 
         sqlite3_stmt* stmt = nullptr;
         if (sqlite3_prepare_v2(db,
+                // The formatting JSON span type is "words_of_christ" (module_info's
+                // own vocabulary, see bible_verse.formatting in BibleTranslation.sql);
+                // the module_feature.feature_name for this is the schema's separate
+                // "red_letter" (module_feature.sql's documented vocabulary).
                 "SELECT COUNT(*) FROM bible_verse WHERE formatting LIKE '%\"words_of_christ\"%'",
                 -1, &stmt, nullptr) == SQLITE_OK) {
             if (sqlite3_step(stmt) == SQLITE_ROW && sqlite3_column_int64(stmt, 0) > 0) {
-                insertModuleFeature("words_of_christ");
+                insertModuleFeature("red_letter");
             }
             sqlite3_finalize(stmt);
         }

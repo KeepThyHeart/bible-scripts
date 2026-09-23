@@ -433,7 +433,7 @@ namespace SwordCommon {
      * which loads it from the Bible repo the same way
      * scripts/lib/schema.js does for the Node importers (task 0035 / design
      * §6.1). Each converter's createDatabase() calls it once with its own
-     * type's schema file name ("Bible.sql", "Commentary.sql", ...).
+     * type's schema file name ("BibleTranslation.sql", "Commentary.sql", ...).
      */
 
     /**

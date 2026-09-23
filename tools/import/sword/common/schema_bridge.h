@@ -12,7 +12,7 @@
  * (a second parser that could itself drift from the first), loadRepoSchema()
  * shells out to `node scripts/lib/schema.js <file>` — the exact same
  * `loadSchema()` the Node importers (import-tsk.js) already use — and
- * executes whatever comes back. One expanded schema file (e.g. Bible.sql)
+ * executes whatever comes back. One expanded schema file (e.g. BibleTranslation.sql)
  * already includes module_info.sql, compression_dictionary.sql,
  * module_feature.sql and verse_link.sql via its own `@include` lines, so one
  * call replaces a converter's entire hand-written schema block.
@@ -26,7 +26,7 @@
 namespace SwordCommon {
 
     /**
-     * Fetch the expanded DDL for `schemaFileName` (e.g. "Bible.sql",
+     * Fetch the expanded DDL for `schemaFileName` (e.g. "BibleTranslation.sql",
      * "Commentary.sql" — a name under the Bible repo's
      * packages/core/sql/schemas/initial/, exactly as scripts/lib/schema.js's
      * loadSchema() expects it).
