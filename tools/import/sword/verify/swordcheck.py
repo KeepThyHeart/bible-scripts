@@ -547,7 +547,14 @@ def probe_dump(zip_path, module=None, keep_path=None):
     if keep_path:
         with open(keep_path, 'w', encoding='utf-8') as f:
             f.write(out)
-    return [json.loads(line) for line in out.splitlines() if line.strip()]
+    # split('\n'), NOT str.splitlines(): JSON Lines is defined by ASCII LF
+    # records, but splitlines() also breaks on U+2028/U+2029/NEL/etc. — real
+    # SWORD source text can legitimately contain one of those (confirmed on
+    # RWP.zip, task 0035: a literal U+0085 NEL byte inside Greek text,
+    # reproduced identically by sword-probe every run), which is valid inside
+    # a JSON string and does not need escaping, but silently torn a `"raw"`
+    # value's line in two and broke json.loads() on both halves.
+    return [json.loads(line) for line in out.split('\n') if line.strip()]
 
 
 def open_db(path):
@@ -558,63 +565,112 @@ def open_db(path):
     return con
 
 
-def decode_cell(raw, compression, dictionary):
+def decompress_cell_bytes(raw, compression, dictionary):
     """
-    Decode one prose cell (design §3.2). `raw` is whatever sqlite3 handed back:
-    a `str` (open_db()'s text_factory already decoded a TEXT-stored cell —
-    stored as plain text regardless of the module's codec, per the keep-only-
-    if-smaller rule) or `bytes` (a BLOB-stored codec frame, text_factory does
-    not touch BLOB columns).
+    Undo the codec on one prose cell (design §3.2), returning the exact
+    decoded BYTES — mirrors content_digest.cpp's decodeColumn() /
+    compression.cpp's deflateDecode()/zstdDecode(): no UTF-8 validation, no
+    replacement, byte-for-byte. `raw` is always `bytes` here (see
+    decode_cell() and compute_content_sha256(), the two callers).
     """
     if raw is None:
-        return ''
-    if isinstance(raw, str):
-        return raw
+        return b''
     if compression == 'deflate':
         d = zlib.decompressobj(-15, zdict=dictionary or b'')
-        return (d.decompress(raw) + d.flush()).decode('utf-8')
+        return d.decompress(raw) + d.flush()
     if compression == 'zstd':
         if zstandard is None:
             raise RuntimeError("this module has zstd-compressed content but the 'zstandard' package is not installed")
         dctx = (zstandard.ZstdDecompressor(dict_data=zstandard.ZstdCompressionDict(dictionary))
                 if dictionary else zstandard.ZstdDecompressor())
-        return dctx.decompress(raw).decode('utf-8')
-    # A BLOB cell under compression='none' is not a conforming file; report it
-    # as best-effort text rather than crashing the batch over one bad module.
-    return raw.decode('utf-8', 'replace')
+        return dctx.decompress(raw)
+    # compression == 'none': not decompressed, just the stored bytes.
+    return raw
 
 
-def compute_content_sha256(con, module_type, compression='none', dictionary=None):
+def decode_cell(raw, compression, dictionary):
+    """
+    Decode one prose cell for DISPLAY / fidelity and hygiene checks (never
+    for the content_sha256 recompute — see compute_content_sha256(), which
+    needs the exact bytes decode_cell() deliberately does not preserve).
+    `raw` is whatever sqlite3 handed back: a `str` (open_db()'s text_factory
+    already decoded a TEXT-stored cell — stored as plain text regardless of
+    the module's codec, per the keep-only-if-smaller rule) or `bytes` (a
+    BLOB-stored codec frame, text_factory does not touch BLOB columns).
+
+    errors='replace', not strict: invalid UTF-8 in the decoded bytes is a
+    property of the source content (confirmed byte-for-byte against
+    libsword's own raw reading on Barnes.zip, task 0035 — not something
+    conversion introduces), not a decompression failure. The existing
+    'replacement_char' hygiene check (U+FFFD) is what turns this into a
+    finding; a hard crash here would just take the whole module out of the
+    batch over content this repository does not own.
+    """
+    if raw is None:
+        return ''
+    if isinstance(raw, str):
+        return raw
+    return decompress_cell_bytes(raw, compression, dictionary).decode('utf-8', 'replace')
+
+
+def compute_content_sha256(db_path, module_type, compression='none', dictionary=None):
     """
     The canonical content digest (design §2.7) — mirrors content-digest.js and
     content_digest.cpp exactly (see CONTENT_MAP's doc comment above); this is
     the THIRD independent implementation of the same formula, in the THIRD
     language the pipeline uses, which is itself part of what proves the codec
     path end to end (task 0035 requirement 6 / design §6.3).
+
+    Must hash the exact bytes the C++/JS implementations hash, invalid UTF-8
+    included (confirmed on Barnes.zip, task 0035: SWORD's own source data,
+    reproduced identically by libsword, is not valid UTF-8 in a few spots) —
+    so this opens its own connection with a plain `bytes` text_factory rather
+    than reusing the caller's (open_db() sets text_factory to lossy-replace
+    TEXT columns for display purposes, which would silently change what gets
+    hashed).
     """
     shapes = CONTENT_MAP.get(module_type)
     if not shapes:
         raise ValueError(f"compute_content_sha256: no ContentShape for module type {module_type!r}")
 
-    h = hashlib.sha256()
-    for shape in shapes:
-        cols = shape['indexed']  # prose ∪ indexed, declared order == indexed's order (see content-digest.js)
-        col_list = ', '.join(f'"{c}"' for c in [shape['rowid']] + list(cols))
-        for row in con.execute(f'SELECT {col_list} FROM "{shape["table"]}" ORDER BY "{shape["rowid"]}" ASC'):
-            h.update(struct.pack('<Q', row[0]))
-            for i, col in enumerate(cols):
-                raw = row[i + 1]
-                if raw is None:
-                    h.update(b'\x00')
-                    continue
-                decoded = decode_cell(raw, compression, dictionary) if col in shape['prose'] else (
-                    raw if isinstance(raw, str) else raw.decode('utf-8', 'replace'))
-                encoded = decoded.encode('utf-8')
-                h.update(b'\x01')
-                h.update(struct.pack('<Q', len(encoded)))
-                h.update(encoded)
-        h.update(b'\x1e')
-    return h.hexdigest()
+    raw_con = sqlite3.connect(f'file:{os.path.abspath(db_path)}?immutable=1', uri=True)
+    raw_con.text_factory = bytes
+    try:
+        h = hashlib.sha256()
+        for shape in shapes:
+            cols = shape['indexed']  # prose ∪ indexed, declared order == indexed's order (see content-digest.js)
+            # typeof(): a prose column stores per-ROW, not per-module — the
+            # "keep only if smaller" rule (§3.2) leaves some rows as plain
+            # TEXT even in a compressed module, so ONLY a 'blob' cell is a
+            # codec frame; decompressing a 'text' one would corrupt it (it
+            # is not a deflate/zstd stream at all).
+            selected = [shape['rowid']]
+            for c in cols:
+                selected.append(c)
+                if c in shape['prose']:
+                    selected.append(f'typeof("{c}")')
+            col_list = ', '.join(f'"{c}"' if not c.startswith('typeof(') else c for c in selected)
+            for row in raw_con.execute(f'SELECT {col_list} FROM "{shape["table"]}" ORDER BY "{shape["rowid"]}" ASC'):
+                h.update(struct.pack('<Q', row[0]))
+                pos = 1
+                for col in cols:
+                    raw = row[pos]
+                    pos += 1
+                    is_prose = col in shape['prose']
+                    cell_type = row[pos] if is_prose else None
+                    if is_prose:
+                        pos += 1
+                    if raw is None:
+                        h.update(b'\x00')
+                        continue
+                    decoded = decompress_cell_bytes(raw, compression, dictionary) if (is_prose and cell_type == b'blob') else raw
+                    h.update(b'\x01')
+                    h.update(struct.pack('<Q', len(decoded)))
+                    h.update(decoded)
+            h.update(b'\x1e')
+        return h.hexdigest()
+    finally:
+        raw_con.close()
 
 
 def load_uuid_map():
@@ -932,7 +988,7 @@ def verify_bible(zip_path, db_path, log_path=None, reference_db=None, catalog_ro
     # design §6.3) — computed here, while `db` is still open; consumed lower
     # down where the metadata section already lives.
     v2_compression, v2_dictionary = check_v2_contract(F, db, mi, tables, report['module'])
-    content_sha256_recomputed = compute_content_sha256(db, 'bible', v2_compression, v2_dictionary)
+    content_sha256_recomputed = compute_content_sha256(db_path, 'bible', v2_compression, v2_dictionary)
     size_bytes = os.path.getsize(db_path)
     db.close()
 
@@ -1477,7 +1533,7 @@ def verify_generic(zip_path, db_path, module_type, log_path=None, catalog_row=No
     # silently operating on raw bytes (or never matching anything).
     rows = [(rowid, key, decode_cell(content, compression, dictionary)) for rowid, key, content in raw_rows]
 
-    content_sha256_recomputed = compute_content_sha256(db, module_type, compression, dictionary)
+    content_sha256_recomputed = compute_content_sha256(db_path, module_type, compression, dictionary)
     size_bytes = os.path.getsize(db_path)
 
     links = db.execute('SELECT COUNT(*) FROM verse_link').fetchone()[0] if 'verse_link' in tables else None

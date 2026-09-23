@@ -84,8 +84,22 @@ async function computeContentSha256(db, moduleType, options = {}) {
 
   for (const shape of shapes) {
     const columns = shape.indexed; // prose ∪ indexed, declared order — see file doc comment
-    const colList = [shape.rowid, ...columns].map(c => `"${c}"`).join(', ');
-    const rows = await dbAll(db, `SELECT ${colList} FROM "${shape.table}" ORDER BY "${shape.rowid}" ASC`);
+    // CAST(... AS BLOB): every column comes back as a Buffer of its EXACT
+    // stored bytes, whatever its storage class — matching
+    // content_digest.cpp's decodeColumn(), which never UTF-8-validates
+    // (confirmed on Barnes.zip, task 0035: real SWORD source data, verified
+    // byte-identical to libsword's own reading, is not valid UTF-8 in a few
+    // spots — `Buffer.toString('utf8')`'s silent U+FFFD replacement would
+    // otherwise change the hash without the file being wrong). A prose
+    // column's typeof() tells apart a 'blob' cell (one codec frame — needs
+    // decompressing) from a 'text' one (the per-row keep-only-if-smaller
+    // rule, §3.2, can leave it uncompressed even in a compressed module).
+    const parts = [`"${shape.rowid}"`];
+    for (const col of columns) {
+      parts.push(`CAST("${col}" AS BLOB) AS "${col}"`);
+      if (shape.prose.includes(col)) parts.push(`typeof("${col}") AS "${col}__type"`);
+    }
+    const rows = await dbAll(db, `SELECT ${parts.join(', ')} FROM "${shape.table}" ORDER BY "${shape.rowid}" ASC`);
 
     for (const row of rows) {
       hash.update(u64le(row[shape.rowid]));
@@ -96,8 +110,8 @@ async function computeContentSha256(db, moduleType, options = {}) {
           continue;
         }
         const isProse = shape.prose.includes(col);
-        const decoded = isProse ? codec.decodeSync(compression, raw, dictionary) : textOf(raw);
-        const bytes = Buffer.from(decoded, 'utf8');
+        const isCompressedCell = isProse && compression !== 'none' && row[`${col}__type`] === 'blob';
+        const bytes = isCompressedCell ? await decodeProseBytes(compression, raw, dictionary) : raw;
         hash.update(Buffer.from([0x01]));
         hash.update(u64le(bytes.length));
         hash.update(bytes);
@@ -110,8 +124,11 @@ async function computeContentSha256(db, moduleType, options = {}) {
   return hash.digest('hex');
 }
 
-function textOf(raw) {
-  return Buffer.isBuffer(raw) ? raw.toString('utf8') : String(raw);
+/** Byte-exact decompress for one prose cell — see the doc comment above. */
+async function decodeProseBytes(compression, frame, dict) {
+  if (compression === 'deflate') return codec.deflateDecodeBytes(frame, dict);
+  if (compression === 'zstd') return codec.zstdDecodeBytes(frame);
+  throw new Error(`content-digest: unknown compression '${compression}'`);
 }
 
 async function getCompression(db) {

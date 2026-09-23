@@ -61,15 +61,34 @@ function deflateEncode(text, dict) {
 }
 
 /**
+ * Decode a raw DEFLATE frame back to its exact original bytes (Buffer, not a
+ * JS string): `.toString('utf8')` REPLACES invalid UTF-8 with U+FFFD (Node
+ * gives no strict mode), which is fine for display but corrupts anything
+ * that must reproduce the source byte-for-byte — content_sha256 (§2.7), most
+ * of all, since compression.cpp/content_digest.cpp hash the raw decoded
+ * bytes with no UTF-8 validation at all (confirmed on Barnes.zip, task 0035:
+ * real SWORD source data, byte-identical to libsword's own reading, is not
+ * valid UTF-8 in a few spots). Use this for the digest; deflateDecode()
+ * (below) remains the lossy, string-returning form for display/validation
+ * text scans, where U+FFFD is the intended, documented behaviour.
+ * @param {Buffer} frame
+ * @param {Buffer} [dict] must be the same dictionary the frame was encoded with
+ * @returns {Buffer}
+ */
+function deflateDecodeBytes(frame, dict) {
+  const opts = {};
+  if (dict && dict.length) opts.dictionary = dict;
+  return zlib.inflateRawSync(frame, opts);
+}
+
+/**
  * Decode a raw DEFLATE frame back to UTF-8 text.
  * @param {Buffer} frame
  * @param {Buffer} [dict] must be the same dictionary the frame was encoded with
  * @returns {string}
  */
 function deflateDecode(frame, dict) {
-  const opts = {};
-  if (dict && dict.length) opts.dictionary = dict;
-  return zlib.inflateRawSync(frame, opts).toString('utf8');
+  return deflateDecodeBytes(frame, dict).toString('utf8');
 }
 
 /** True when a Node binding for zstd decode is available. */
@@ -91,6 +110,17 @@ function hasZstdBinding() {
  * @returns {Promise<string>}
  */
 async function zstdDecode(frame) {
+  const out = await zstdDecodeBytes(frame);
+  return out.toString('utf8');
+}
+
+/**
+ * Byte-exact counterpart of zstdDecode() — see deflateDecodeBytes()'s doc
+ * comment for why the digest needs this instead of the lossy string form.
+ * @param {Buffer} frame
+ * @returns {Promise<Buffer>}
+ */
+async function zstdDecodeBytes(frame) {
   if (!zstdBinding) {
     const err = new Error(
       `zstd decode requires the optional '@mongodb-js/zstd' dependency, which failed to load: ` +
@@ -108,8 +138,7 @@ async function zstdDecode(frame) {
     err.code = 'zstd-dictionary-unsupported';
     throw err;
   }
-  const out = await zstdBinding.decompress(frame);
-  return out.toString('utf8');
+  return zstdBinding.decompress(frame);
 }
 
 /**
@@ -182,8 +211,10 @@ module.exports = {
   SUPPORTED_CODECS,
   deflateEncode,
   deflateDecode,
+  deflateDecodeBytes,
   hasZstdBinding,
   zstdDecode,
+  zstdDecodeBytes,
   zstdFrameHasDictId,
   decodeSync,
   decodeAsync,

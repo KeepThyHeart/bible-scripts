@@ -18,14 +18,20 @@ const path = require('path');
 /** The module format (spec) version emitted by these converters. */
 const FORMAT_VERSION = '0.2';
 /**
- * Format versions a reader accepts, and the legacy strings tolerated during
- * rollout — mirrors packages/core's ModuleFormat.ts (design §2.6). Not
- * currently read by anything in this repo (the converters only ever WRITE
- * FORMAT_VERSION); kept here so validate-module.js and the verify harness
- * have one shared place to import the gate from instead of hand-copying it.
+ * Format versions a reader accepts — mirrors packages/core's ModuleFormat.ts
+ * (design §2.6). Not currently read by anything in this repo (the converters
+ * only ever WRITE FORMAT_VERSION); kept here so validate-module.js and the
+ * verify harness have one shared place to import the gate from instead of
+ * hand-copying it.
+ *
+ * The legacy `'2.0'` string (task 0035 requirement: "retire the legacy '2.0'
+ * strings") is deliberately NOT in this list: it named the ten
+ * development-catalog modules that predated the schema default moving to
+ * `'0.1'`, and the library reconversion (task 0035 Phase 2) replaces every
+ * one of them with a real `'0.2'` file, so nothing in the reconverted
+ * library carries `'2.0'` any more and no reader needs to tolerate it.
  */
 const READABLE_FORMAT_VERSIONS = ['0.1', '0.2'];
-const LEGACY_FORMAT_VERSIONS = ['2.0'];
 /** The versification every module produced here conforms to. */
 const VERSIFICATION = 'kjv-english';
 
@@ -261,7 +267,6 @@ function recordModuleUuid(map, moduleName, uuid) {
 module.exports = {
   FORMAT_VERSION,
   READABLE_FORMAT_VERSIONS,
-  LEGACY_FORMAT_VERSIONS,
   VERSIFICATION,
   sha256Hex,
   deterministicUuid,

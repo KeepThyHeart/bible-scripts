@@ -9,6 +9,7 @@
 'use strict';
 
 const assert = require('assert');
+const crypto = require('crypto');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
@@ -186,6 +187,42 @@ async function main() {
     await close(db2);
 
     assert.notStrictEqual(digestNull, digestEmpty);
+  });
+
+  await test('a compressed cell with invalid UTF-8 bytes hashes byte-exact, not lossily (task 0035)', async () => {
+    // Real SWORD source data is not always valid UTF-8 even when a module
+    // declares Encoding=UTF-8 (confirmed on the real Barnes.zip commentary,
+    // byte-identical to libsword's own reading — not a conversion bug).
+    // content_digest.cpp hashes the raw decoded bytes with no UTF-8
+    // validation; this must match exactly, so a Buffer.toString('utf8')
+    // round-trip (which silently substitutes U+FFFD for invalid bytes) is
+    // wrong here even though it is exactly right for display purposes.
+    const invalid = Buffer.concat([Buffer.from('before '), Buffer.from([0x9b]), Buffer.from(' after')]);
+    const frame = zlib.deflateRawSync(invalid);
+    assert.ok(frame.length + 16 < invalid.length || true); // may or may not shrink; irrelevant here
+
+    const file = path.join(TMP, 'invalid-utf8.db');
+    const db = openDb(file);
+    await run(db, 'CREATE TABLE commentary_entry (entry_id INTEGER PRIMARY KEY, content BLOB)');
+    await run(db, 'CREATE TABLE module_info (info_id INTEGER PRIMARY KEY, compression TEXT)');
+    await run(db, 'CREATE TABLE compression_dictionary (codec TEXT PRIMARY KEY, dict_blob BLOB)');
+    await run(db, "INSERT INTO module_info (info_id, compression) VALUES (1, 'deflate')");
+    await run(db, "INSERT INTO compression_dictionary (codec, dict_blob) VALUES ('deflate', ?)", [Buffer.alloc(0)]);
+    await run(db, 'INSERT INTO commentary_entry (entry_id, content) VALUES (1, ?)', [frame]);
+
+    const digest = await computeContentSha256(db, 'commentary', { compression: 'deflate', dictionary: Buffer.alloc(0) });
+    await close(db);
+
+    // Manually build the SAME formula (§2.7) over the true raw bytes.
+    const expected = crypto.createHash('sha256');
+    const u64le = n => { const b = Buffer.alloc(8); b.writeBigUInt64LE(BigInt(n)); return b; };
+    expected.update(u64le(1));
+    expected.update(Buffer.from([0x01]));
+    expected.update(u64le(invalid.length));
+    expected.update(invalid);
+    expected.update(Buffer.from([0x1e]));
+
+    assert.strictEqual(digest, expected.digest('hex'));
   });
 
   await test('rejects an out-of-scope module type', async () => {
