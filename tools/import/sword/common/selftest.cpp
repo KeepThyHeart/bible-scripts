@@ -1,13 +1,17 @@
 /**
  * selftest.cpp — unit tests for the module format v0.2 additions to
  * sword_common (compression.{h,cpp}, content_digest.{h,cpp},
- * schema_bridge.{h,cpp}). Task 0035 / design §2.7, §3.
+ * schema_bridge.{h,cpp}), plus parseOsisVerse/buildFormattingJson regression
+ * coverage for bugs the task 0035 reconversion round found in real modules
+ * (poetry lines, and the LEB/ABP text-hygiene fixes). Task 0035 / design
+ * §2.3 (block.lines), §2.7, §3.
  *
  * Deliberately does NOT need libsword, a SWORD module, or a real Bible repo
- * checkout: compression and the digest are pure functions over sqlite3, and
- * the schema bridge is tested against a tiny fixture schema tree built here
+ * checkout: compression and the digest are pure functions over sqlite3, the
+ * schema bridge is tested against a tiny fixture schema tree built here
  * (this repo has no access to the real one — see schema_bridge.h's doc
- * comment). Full end-to-end conversion is exercised by
+ * comment), and parseOsisVerse is a pure string -> struct parser with no
+ * SWMgr/SWModule dependency. Full end-to-end conversion is exercised by
  * tools/import/sword/verify/ against a real SWORD module and a real Bible
  * repo checkout, neither of which this binary requires.
  *
@@ -17,6 +21,7 @@
 #include "compression.h"
 #include "content_digest.h"
 #include "schema_bridge.h"
+#include "sword_common.h"
 
 #include <sqlite3.h>
 #include <cassert>
@@ -283,6 +288,87 @@ void test_loadRepoSchema_against_fixture() {
 }
 
 // ============================================================================
+// sword_common.{h,cpp} — parseOsisVerse / buildFormattingJson (task 0035,
+// poetry lines + real-module bugs the reconversion round surfaced).
+//
+// Pure string -> struct parsing: no libsword module or SWMgr needed.
+// ============================================================================
+
+void test_parseOsisVerse_poetry_lines_milestone() {
+    // ASV/BSB/Darby/AKJV/... style: <l sID=".."/>text<l eID=".."/> pairs.
+    const std::string osis =
+        "<l level=\"1\" sID=\"L1\"/>Jehovah is my shepherd<l eID=\"L1\" level=\"1\"/> "
+        "<l level=\"1\" sID=\"L2\"/>I shall not want<l eID=\"L2\" level=\"1\"/>";
+    const OsisVerseResult r = parseOsisVerse(osis);
+    CHECK(r.text == "Jehovah is my shepherd I shall not want");
+    CHECK(r.block.lines.size() == 2);
+    if (r.block.lines.size() == 2) {
+        CHECK(r.block.lines[0].level == 1 && r.block.lines[0].start == 0 && r.block.lines[0].end == 3);
+        CHECK(r.block.lines[1].level == 1 && r.block.lines[1].start == 4 && r.block.lines[1].end == 7);
+    }
+    const std::string json = buildFormattingJson(r);
+    CHECK(json.find("\"lines\":[{\"level\":1,\"start\":0,\"end\":3},{\"level\":1,\"start\":4,\"end\":7}]")
+          != std::string::npos);
+    CHECK(json.find("poetry_level") == std::string::npos);
+}
+
+void test_parseOsisVerse_poetry_lines_bare_markers() {
+    // NETfree/NETtext style: bare, id-less <l/> line-break markers.
+    const std::string osis = "The LORD is my shepherd, <l />I lack nothing. <l />";
+    const OsisVerseResult r = parseOsisVerse(osis);
+    CHECK(r.block.lines.size() == 2);
+    if (r.block.lines.size() == 2) {
+        CHECK(r.block.lines[0].start == 0 && r.block.lines[0].end == 4);   // "The LORD is my shepherd,"
+        CHECK(r.block.lines[1].start == 5 && r.block.lines[1].end == 7);   // "I lack nothing."
+    }
+}
+
+void test_parseOsisVerse_no_lines_when_source_has_none() {
+    // Prose with no <l> markup at all (e.g. KJV): no line data to report —
+    // not a level-0 default, no "lines" key at all.
+    const OsisVerseResult r = parseOsisVerse("In the beginning God created the heavens and the earth.");
+    CHECK(r.block.lines.empty());
+    CHECK(buildFormattingJson(r).empty());
+}
+
+void test_parseOsisVerse_escaped_angle_bracket_dropped() {
+    // LEB ships stray markup double-escaped ("&lt;block&gt;"); libsword's own
+    // plain-text fallback strips just the delimiters and keeps "block" as
+    // plain text, and bible_verse.text MUST NOT contain '<' or '>'.
+    const std::string osis =
+        "To the brothers in Antioch and Syria and Cilicia. &lt;block&gt; Greetings!";
+    const OsisVerseResult r = parseOsisVerse(osis);
+    CHECK(r.text.find('<') == std::string::npos);
+    CHECK(r.text.find('>') == std::string::npos);
+    CHECK(r.text.find("block") != std::string::npos);
+}
+
+void test_parseOsisVerse_backslash_marker_any_case_stripped() {
+    // ABP has a literal "\Eit" (an escape-style marker with an UPPERCASE
+    // first letter) left in the source; bible_verse.text MUST NOT contain a
+    // backslash, whatever case the marker name is.
+    const std::string osis = "for loved you \\Eit the your God.";
+    const OsisVerseResult r = parseOsisVerse(osis);
+    CHECK(r.text.find('\\') == std::string::npos);
+    CHECK(r.text.find("the your God") != std::string::npos);
+}
+
+void test_parseOsisVerse_abp_word_order_numeral_dropped() {
+    // ABP's word-order numeral (<hi type="super"> in raw OSIS, <sup> in
+    // SWORD's HTML rendering) is not verse text: left in, it fuses onto the
+    // adjacent word with no space ("2way"), corrupting real words.
+    const std::string osisRaw =
+        "<w lemma=\"strong:G03598\" src=\"15\">[<seg><hi type=\"super\">2</hi></seg>way</w> "
+        "<w lemma=\"strong:G02556\" src=\"16\"><seg><hi type=\"super\">1</hi></seg>an evil]</w>";
+    const OsisVerseResult rRaw = parseOsisVerse(osisRaw);
+    CHECK(rRaw.text == "[way an evil]");
+
+    const std::string osisHtml = "[<sup>2</sup>way <sup>1</sup>an evil]";
+    const OsisVerseResult rHtml = parseOsisVerse(osisHtml);
+    CHECK(rHtml.text == "[way an evil]");
+}
+
+// ============================================================================
 
 int main() {
     RUN(test_deflate_roundtrip_no_dict);
@@ -295,6 +381,12 @@ int main() {
     RUN(test_applyCompression_below_threshold_stays_none);
     RUN(test_applyCompression_forced_codec_overrides_threshold);
     RUN(test_loadRepoSchema_against_fixture);
+    RUN(test_parseOsisVerse_poetry_lines_milestone);
+    RUN(test_parseOsisVerse_poetry_lines_bare_markers);
+    RUN(test_parseOsisVerse_no_lines_when_source_has_none);
+    RUN(test_parseOsisVerse_escaped_angle_bracket_dropped);
+    RUN(test_parseOsisVerse_backslash_marker_any_case_stripped);
+    RUN(test_parseOsisVerse_abp_word_order_numeral_dropped);
 
     if (g_failures == 0) {
         std::cout << "\nALL SELFTESTS PASSED\n";

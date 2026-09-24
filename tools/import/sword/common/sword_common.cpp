@@ -498,6 +498,17 @@ namespace SwordCommon {
         };
 
         /**
+         * A poetic line (<l>) that has been opened but not yet closed.
+         * `id` is the milestone sID for `<l sID=".."/>...<l eID=".."/>` pairs,
+         * or empty for a paired `<l>...</l>` with no id.
+         */
+        struct OpenPoetryLine {
+            std::string id;
+            int level = 1;
+            int start = 0;
+        };
+
+        /**
          * Extract every Strong's number from a `lemma` attribute value.
          * "strong:G3588 strong:G2316 lemma.TR:o lemma.TR:qeos" -> {"G3588","G2316"}
          */
@@ -700,8 +711,15 @@ namespace SwordCommon {
 
         std::vector<OpenSpan> open;
         std::vector<InterlinearRecord> openWords;   // nested <w> elements
+        std::vector<OpenPoetryLine> openLines;      // <l sID=.."/>.."l eID=.."/> or <l>..</l>
         std::string currentWord;
         std::string headingBuffer;
+
+        // For a source that marks line breaks with a bare, id-less <l/>
+        // (NETfree/NETtext): the word index where the NEXT line begins. Every
+        // bare marker closes the line running from here to just before it.
+        int pendingLineStart = 0;
+        bool anyBareLineBreak = false;
 
         int noteDepth = 0;    // inside <note> — discard everything
         int titleDepth = 0;   // inside <title> — divert to heading
@@ -742,6 +760,32 @@ namespace SwordCommon {
             const int at = result.wordCount + (currentWord.empty() ? 0 : 1);
             if (at == 0) result.block.paragraphStart = true;
             lastParagraphMarkerAt = at;
+        };
+
+        // Parse an <l> tag's level="n" attribute, clamped to 1..3 (USFM \q1..\q3).
+        auto parseLineLevel = [&](const std::string& tagBody) {
+            int level = 1;
+            const std::string levelAttr = tagAttr(tagBody, "level");
+            if (!levelAttr.empty()) {
+                try { level = std::stoi(levelAttr); } catch (const std::exception&) { level = 1; }
+            }
+            if (level < 1) level = 1;
+            if (level > 3) level = 3;
+            return level;
+        };
+
+        // Close the most recently opened <l> whose id matches (both empty
+        // matches an id-less paired <l>...</l>), recording its word range.
+        auto closeOpenLine = [&](const std::string& id) {
+            for (auto it = openLines.rbegin(); it != openLines.rend(); ++it) {
+                if (it->id != id) continue;
+                const int endWord = result.wordCount - 1;
+                if (endWord >= it->start) {
+                    result.block.lines.push_back({it->level, it->start, endWord});
+                }
+                openLines.erase(std::next(it).base());
+                return;
+            }
         };
 
         auto closeSpan = [&](const std::string& element, const std::string& eid) {
@@ -904,26 +948,39 @@ namespace SwordCommon {
                     continue;
                 }
                 if (name == "lg") {
-                    if (!closing && !selfClosing && result.block.poetryLevel == 0) {
-                        result.block.poetryLevel = 1;
-                    }
+                    // <lg> (line group) only wraps <l> elements; every word
+                    // range comes from the <l> tags themselves (below), so
+                    // <lg> itself carries no data of its own.
                     continue;
                 }
                 if (name == "l") {
-                    if (!closing) {
+                    // Three encodings are seen in real modules, all handled
+                    // here: (1) milestone pairs `<l sID=".."/>text<l eID=".."/>`
+                    // (ASV, BSB, Darby, CPDV, NHEB*, AKJV, OEBcth, ...);
+                    // (2) paired tags `<l level="n">text</l>` with no id;
+                    // (3) bare, id-less break markers `<l/>` that simply split
+                    // the surrounding prose into lines (NETfree/NETtext).
+                    if (!eid.empty()) {
+                        closeOpenLine(eid);
+                    } else if (closing) {
+                        closeOpenLine("");
+                    } else {
                         if (attrContains(type, "selah")) {
                             result.block.selah = true;
                         }
-                        int level = 1;
-                        const std::string levelAttr = tagAttr(body, "level");
-                        if (!levelAttr.empty()) {
-                            try { level = std::stoi(levelAttr); } catch (const std::exception&) { level = 1; }
+                        const int level = parseLineLevel(body);
+                        if (!sid.empty()) {
+                            openLines.push_back({sid, level, result.wordCount});
+                        } else if (selfClosing) {
+                            const int endWord = result.wordCount - 1;
+                            if (endWord >= pendingLineStart) {
+                                result.block.lines.push_back({level, pendingLineStart, endWord});
+                            }
+                            pendingLineStart = result.wordCount;
+                            anyBareLineBreak = true;
+                        } else {
+                            openLines.push_back({"", level, result.wordCount});
                         }
-                        if (level < 1) level = 1;
-                        if (level > 3) level = 3;
-                        if (level > result.block.poetryLevel) result.block.poetryLevel = level;
-                    } else {
-                        flushWord();
                     }
                     continue;
                 }
@@ -939,10 +996,16 @@ namespace SwordCommon {
                     // KJV et al: <transChange type="added">
                     spanType = (type.empty() || attrContains(type, "added")) ? "supplied" : "emphasis";
                 } else if (name == "hi") {
-                    // Only map presentation that carries known meaning. type="super"
-                    // and friends are typographic noise and get no span.
+                    // Only map presentation that carries known meaning.
                     if (attrContains(type, "italic")) spanType = "supplied";
                     else if (attrContains(type, "emphasis") || attrContains(type, "bold")) spanType = "emphasis";
+                    // type="super": the Apostolic Bible Polyglot's word-order
+                    // numeral ("[<hi type="super">2</hi>way ...]"). It is not
+                    // verse text — the source has no space around it, so left
+                    // in it fuses onto the adjacent word ("2way") — and it is
+                    // not a real span either (§ design: "ABP word-order
+                    // numerals" are deliberately unmapped), so drop it outright.
+                    else if (attrContains(type, "super")) dropContent = true;
                     else if (type.empty()) spanType = "emphasis";
                 } else if (name == "q") {
                     const std::string who = tagAttr(body, "who");
@@ -1006,8 +1069,11 @@ namespace SwordCommon {
                         spanType = "divine_name";
                     }
                 } else if (name == "sup") {
-                    // <sup class="n"> is a footnote marker, not verse text.
-                    if (!closing && attrContains(tagAttr(body, "class"), "n")) {
+                    // <sup class="n"> is a footnote marker; a plain <sup> (no
+                    // class) is SWORD's HTML rendering of the same ABP
+                    // word-order numeral that <hi type="super"> carries in raw
+                    // OSIS (see above) — neither is verse text.
+                    if (!closing) {
                         dropContent = true;
                     }
                 }
@@ -1060,7 +1126,16 @@ namespace SwordCommon {
                 }
                 if (next != i) {
                     if (noteDepth == 0) {
-                        if (titleDepth > 0) headingBuffer += decoded;
+                        if (decoded == "<" || decoded == ">") {
+                            // A double-escaped angle bracket ("&lt;"/"&gt;")
+                            // that never formed a real (or recognised) tag —
+                            // some sources (e.g. LEB) escape stray markup
+                            // this way. libsword's own fallback strips just
+                            // the delimiter and keeps whatever is inside as
+                            // plain text, so drop the bracket rather than
+                            // letting it leak into bible_verse.text, which
+                            // MUST NOT contain '<' or '>'.
+                        } else if (titleDepth > 0) headingBuffer += decoded;
                         else if (decoded == "\xC2\xB6") noteParagraphMarker();
                         else if (dropDepth == 0) appendText(decoded);
                     }
@@ -1099,13 +1174,15 @@ namespace SwordCommon {
             }
 
             // Literal USFM character markers left in the source ("\it вслух\it*"
-            // in RSP's headings) are markup, not text; bible_verse.text MUST NOT
-            // contain a backslash. Drop "\name", "\name*", "\+name" and "\name1".
+            // in RSP's headings; "\Eit" in ABP) are markup, not text;
+            // bible_verse.text MUST NOT contain a backslash. Drop "\name",
+            // "\Name", "\name*", "\+name" and "\name1" — any case, since a
+            // marker name is never real verse content either way.
             if (osis[i] == '\\' && i + 1 < osis.size()) {
                 size_t j = i + 1;
                 if (osis[j] == '+') j++;
                 const size_t nameStart = j;
-                while (j < osis.size() && std::islower(static_cast<unsigned char>(osis[j]))) j++;
+                while (j < osis.size() && std::isalpha(static_cast<unsigned char>(osis[j]))) j++;
                 if (j > nameStart && j - nameStart <= 8) {
                     while (j < osis.size() && std::isdigit(static_cast<unsigned char>(osis[j]))) j++;
                     if (j < osis.size() && osis[j] == '*') j++;
@@ -1158,6 +1235,33 @@ namespace SwordCommon {
             }
             open.pop_back();
         }
+
+        // Close any <l> left open (a milestone eID that never arrived, or
+        // trailing malformed markup) at the last word.
+        for (const OpenPoetryLine& ol : openLines) {
+            const int endWord = result.wordCount - 1;
+            if (endWord >= ol.start) {
+                result.block.lines.push_back({ol.level, ol.start, endWord});
+            }
+        }
+        openLines.clear();
+
+        // Bare `<l/>` markers (NETfree/NETtext) close the line running from
+        // the previous marker to the next one; the text after the LAST marker
+        // is a line too, out to the end of the verse.
+        if (anyBareLineBreak) {
+            const int endWord = result.wordCount - 1;
+            if (endWord >= pendingLineStart) {
+                result.block.lines.push_back({1, pendingLineStart, endWord});
+            }
+        }
+
+        // Deterministic order: by start, then end.
+        std::sort(result.block.lines.begin(), result.block.lines.end(),
+                  [](const PoetryLine& a, const PoetryLine& b) {
+                      if (a.start != b.start) return a.start < b.start;
+                      return a.end < b.end;
+                  });
 
         // Normalise the heading: collapse whitespace, trim.
         {
@@ -1233,9 +1337,17 @@ namespace SwordCommon {
                 json << "\"paragraph_start\":true";
                 first = false;
             }
-            if (result.block.poetryLevel > 0) {
+            if (!result.block.lines.empty()) {
                 if (!first) json << ",";
-                json << "\"poetry_level\":" << result.block.poetryLevel;
+                json << "\"lines\":[";
+                for (size_t i = 0; i < result.block.lines.size(); i++) {
+                    const PoetryLine& l = result.block.lines[i];
+                    if (i > 0) json << ",";
+                    json << "{\"level\":" << l.level
+                         << ",\"start\":" << l.start
+                         << ",\"end\":" << l.end << "}";
+                }
+                json << "]";
                 first = false;
             }
             if (!result.block.heading.empty()) {

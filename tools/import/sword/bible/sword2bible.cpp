@@ -166,11 +166,9 @@ static SwordCommon::OsisVerseResult mergeVerseResults(const SwordCommon::OsisVer
 
     merged.wordCount = first.wordCount + second.wordCount;
 
-    // Block-level: the first fragment opens the block; poetry takes the deeper
-    // level; the first non-empty heading wins.
+    // Block-level: the first fragment opens the block; the first non-empty
+    // heading wins.
     merged.block.paragraphStart = first.block.paragraphStart;
-    merged.block.poetryLevel = (first.block.poetryLevel > second.block.poetryLevel)
-        ? first.block.poetryLevel : second.block.poetryLevel;
     merged.block.heading = first.block.heading.empty() ? second.block.heading : first.block.heading;
     merged.block.selah = first.block.selah || second.block.selah;
 
@@ -178,6 +176,13 @@ static SwordCommon::OsisVerseResult mergeVerseResults(const SwordCommon::OsisVer
     merged.trailingParagraphMarker = second.trailingParagraphMarker;
 
     const int shift = first.wordCount;
+
+    merged.block.lines = first.block.lines;
+    for (SwordCommon::PoetryLine line : second.block.lines) {
+        line.start += shift;
+        line.end += shift;
+        merged.block.lines.push_back(line);
+    }
 
     merged.spans = first.spans;
     for (SwordCommon::FormatSpan span : second.spans) {

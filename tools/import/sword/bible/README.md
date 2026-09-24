@@ -22,8 +22,9 @@ This tool takes SWORD Bible module ZIP files (from [CrossWire](https://crosswire
 - **Structured spans:** presentation lives in `bible_verse.formatting` as data
   records naming word ranges (`divine_name`, `supplied`, `words_of_christ`,
   `emphasis`, `quotation`, `transliteration`) with **0-based inclusive** offsets
-- **Block properties:** `paragraph_start`, `poetry_level`, `heading`, `selah`,
-  taken from the source's own markers rather than inferred from presentation
+- **Block properties:** `paragraph_start`, `lines` (per-line word ranges, from
+  `<l>`), `heading`, `selah`, taken from the source's own markers rather than
+  inferred from presentation
 - **Variant verse divisions** (Rev 12:18, 3 John 15) are folded into their
   canonical host verse, with the source numbering preserved in
   `formatting.source_verses`
@@ -170,8 +171,8 @@ The converter performs these steps:
      `<divineName>` -> `divine_name`, `<transChange type="added">` -> `supplied`,
      `<q who="Jesus">` -> `words_of_christ`, `<reference osisRef=...>` ->
      `quotation` carrying the source `verse_id` in `ref`
-   - Lifts `<title>` into `block.heading`, `<l level>` into `block.poetry_level`,
-     and pilcrows into `block.paragraph_start`
+   - Lifts `<title>` into `block.heading`, `<l level>` into `block.lines`
+     (one per-line word range per `<l>`), and pilcrows into `block.paragraph_start`
    - Drops `<note>` content (footnotes are not verse text)
    - Counts words and inserts interlinear words at real 0-based word offsets
    - Automatically builds the FTS5 index via triggers
@@ -343,8 +344,9 @@ Span types and their USFM equivalents (canonical list in
 | `quotation` | `\qt` | `<q>`, `<cite>`, `<reference osisRef=...>` (fills `ref`) |
 | `transliteration` | `\tl` | `<foreign>`, `<translit>` |
 
-Block-level properties: `paragraph_start` (`\p`), `poetry_level` 1-3
-(`\q1`-`\q3`), `heading` (`\d`/`\s`), `selah` (`\qs`).
+Block-level properties: `paragraph_start` (`\p`), `lines` — per-line word
+ranges at levels 1-3 (`\q1`-`\q3`), one entry per `<l>` in the source —
+`heading` (`\d`/`\s`), `selah` (`\qs`).
 
 ### Known limitations
 

@@ -965,7 +965,7 @@ const VALID_SPAN_TYPES = new Set([
   'divine_name', 'supplied', 'words_of_christ', 'emphasis', 'quotation',
   'transliteration', 'musical_direction',
 ]);
-const VALID_BLOCK_KEYS = new Set(['paragraph_start', 'lines', 'heading', 'heading_kind']);
+const VALID_BLOCK_KEYS = new Set(['paragraph_start', 'lines', 'heading', 'heading_kind', 'selah']);
 const VALID_FORMATTING_KEYS = new Set(['v', 'block', 'spans', 'source_verses']);
 
 /**

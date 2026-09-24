@@ -118,21 +118,35 @@ namespace SwordCommon {
     };
 
     /**
+     * One poetic line: a word range (0-based, inclusive) at a given
+     * indentation level (1..3, USFM \q1..\q3), taken from an OSIS <l> element.
+     * A verse with no <l> markup in the source has no lines at all — there is
+     * nothing to record, not a level-0 default.
+     */
+    struct PoetryLine {
+        int level = 1;
+        int start = 0;
+        int end = 0;
+    };
+
+    /**
      * Block-level formatting for a verse.
      *
      *   paragraph_start  \p
-     *   poetry_level     \q1..\q3   (0 = prose)
+     *   lines            \q1..\q3   per-line word ranges (empty = prose, or a
+     *                                source that marks poetry without marking
+     *                                individual lines)
      *   heading          \d / \s    (e.g. Psalm superscriptions)
      *   selah            \qs
      */
     struct BlockInfo {
         bool paragraphStart = false;
-        int  poetryLevel = 0;
+        std::vector<PoetryLine> lines;
         std::string heading;
         bool selah = false;
 
         bool isEmpty() const {
-            return !paragraphStart && poetryLevel == 0 && heading.empty() && !selah;
+            return !paragraphStart && lines.empty() && heading.empty() && !selah;
         }
     };
 

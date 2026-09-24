@@ -287,7 +287,7 @@ KEY_VERSES = [
 
 SPAN_TYPES = {'divine_name', 'supplied', 'words_of_christ', 'emphasis', 'quotation',
               'transliteration'}
-BLOCK_KEYS = {'paragraph_start', 'poetry_level', 'heading', 'heading_kind', 'selah'}
+BLOCK_KEYS = {'paragraph_start', 'lines', 'heading', 'heading_kind', 'selah'}
 
 # ---------------------------------------------------------------------------
 # Text hygiene: patterns that must not appear in clean canonical text.
@@ -1166,8 +1166,20 @@ def verify_bible(zip_path, db_path, log_path=None, reference_db=None, catalog_ro
                 fmt_errors.append(f'{ref_name(verse_id)}: unknown block key {k}')
         if block.get('heading'):
             headings.append((verse_id, block['heading']))
-        if 'poetry_level' in block and block['poetry_level'] not in (1, 2, 3):
-            fmt_errors.append(f'{ref_name(verse_id)}: poetry_level {block["poetry_level"]}')
+        if 'lines' in block:
+            lines_val = block['lines']
+            if not isinstance(lines_val, list) or not lines_val:
+                fmt_errors.append(f'{ref_name(verse_id)}: lines is not a non-empty array')
+            else:
+                for ln in lines_val:
+                    lvl = ln.get('level') if isinstance(ln, dict) else None
+                    lst = ln.get('start') if isinstance(ln, dict) else None
+                    lend = ln.get('end') if isinstance(ln, dict) else None
+                    if lvl not in (1, 2, 3):
+                        fmt_errors.append(f'{ref_name(verse_id)}: line level {lvl}')
+                    if not isinstance(lst, int) or not isinstance(lend, int) \
+                            or not (0 <= lst <= lend < max(tokens, 1)):
+                        fmt_errors.append(f'{ref_name(verse_id)}: line {lst}..{lend} outside 0..{tokens - 1}')
         if doc.get('source_verses'):
             source_verse_rows += 1
         for s in doc.get('spans') or []:
