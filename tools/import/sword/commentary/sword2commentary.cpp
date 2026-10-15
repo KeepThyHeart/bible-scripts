@@ -58,6 +58,9 @@ static std::string g_codecOverride;   // "" = auto-decide from size (design §3.
 static std::string g_uuidOverride;    // "" = mint a fresh uuid as before
 static SwordCommon::CompressionOutcome g_compression;
 
+// --drop-cross-chapter-links: see convertEntries().
+static bool g_dropCrossChapterLinks = false;
+
 // Books rejected because they fall outside the 66-book Protestant canon.
 static std::map<std::string, int> g_skippedBooks;
 // Books actually imported, keyed by the OSIS name the SOURCE used. No later
@@ -105,6 +108,8 @@ int main(int argc, char* argv[]) {
             if (i + 1 < argc) inputZip = argv[++i];
         } else if (strcmp(argv[i], "--output") == 0 || strcmp(argv[i], "-o") == 0) {
             if (i + 1 < argc) outputDb = argv[++i];
+        } else if (strcmp(argv[i], "--drop-cross-chapter-links") == 0) {
+            g_dropCrossChapterLinks = true;
         } else if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0) {
             printUsage(argv[0]);
             return 0;
@@ -356,6 +361,10 @@ bool convertEntries(SWModule* module) {
     const int MAX_ITERATIONS = 200000;
     int duplicateCount = 0;
     std::set<int64_t> seenVerses;
+    // Last entry written, to detect a chapter-boundary link in the source index.
+    std::string lastText;
+    int64_t lastChapterKey = -1;      // verse id / 1000: book + chapter
+    int chapterLinkSkipped = 0;
 
     (*vk) = sword::TOP;
     vk->setIntros(false);
@@ -409,6 +418,23 @@ bool convertEntries(SWModule* module) {
                 (*vk)++;
                 continue;
             }
+            // Several SWORD commentaries (Wesley, Geneva, Family, ...) index the
+            // opening verse(s) of a chapter at the PREVIOUS chapter's last record
+            // (Wesley Ps 23:1 -> the Ps 22:31 note; Gen 13:1-2 -> Gen 12:20). The
+            // module has no note for those verses, so storing the repeated text
+            // attaches a foreign note to them. Ranges inside a chapter are kept;
+            // lastText/lastChapterKey stay put so a run of linked verses is
+            // skipped to its end. Opt-in: modules such as Luther use genuine
+            // multi-chapter ranges (Gen.1.1-Gen.4.7), which this would drop.
+            if (g_dropCrossChapterLinks && entryLevel == "verse" && lastChapterKey >= 0 && lastChapterKey != verseIdStart / 1000
+                && text == lastText) {
+                chapterLinkSkipped++;
+                (*vk)++;
+                continue;
+            }
+            lastText = text;
+            lastChapterKey = verseIdStart / 1000;
+
             seenVerses.insert(verseIdStart);
             g_importedBooks[osisBook]++;
 
@@ -446,6 +472,10 @@ bool convertEntries(SWModule* module) {
     sqlite3_exec(db, "COMMIT", nullptr, nullptr, nullptr);
 
     std::cout << "\n  Total entries: " << entryCount << "\n";
+    if (chapterLinkSkipped > 0) {
+        std::cout << "  Skipped " << chapterLinkSkipped
+                  << " chapter-boundary links (opening verses repeating the previous chapter's last note)\n";
+    }
 
     if (!g_skippedBooks.empty()) {
         std::cerr << "\nWARNING: " << g_skippedBooks.size() << " book(s) outside the "
@@ -578,6 +608,11 @@ void printUsage(const char* programName) {
     std::cout << "                prose, else none; design §3.4).\n";
     std::cout << "  --uuid UUID   Reuse this module_uuid instead of minting a fresh one\n";
     std::cout << "                (reconversion; see scripts/data/module-uuid-map.json).\n";
+    std::cout << "  --drop-cross-chapter-links\n";
+    std::cout << "                Skip entries in a new chapter that repeat the previous\n";
+    std::cout << "                chapter's last note (source index links uncommented verses\n";
+    std::cout << "                to it: Wesley, Geneva, Family). Not for modules with real\n";
+    std::cout << "                multi-chapter ranges (Luther).\n";
     std::cout << "  --help, -h    Show this help message\n\n";
     std::cout << "Books outside the 66-book Protestant canon are skipped with a warning.\n\n";
     std::cout << "Example:\n";

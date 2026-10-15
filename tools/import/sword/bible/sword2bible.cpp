@@ -1747,7 +1747,60 @@ private:
     /**
      * Insert interlinear word data (0-based, inclusive word offsets).
      */
+    // Function words that carry no study value on their own. When a <w> holds one
+    // of these AND a content word (G3588 "the" + G3056 "word"), the content word
+    // is the row's primary number.
+    static bool isFunctionStrongs(const std::string& number) {
+        const size_t digit = number.find_first_of("0123456789");
+        if (number.size() < 2 || digit == std::string::npos) return false;
+        const std::string n = std::to_string(std::atoi(number.c_str() + digit));
+        return (number[0] == 'G' && n == "3588")      // the article
+            || (number[0] == 'H' && n == "853");      // the object marker
+    }
+
+    /**
+     * A <w> can carry several Strong's numbers ("strong:G3588 strong:G3056" for
+     * "the Word"), but interlinear_word holds ONE strongs_number per row and every
+     * lookup is an equality match on it. Writing only the first number stored the
+     * article for 15,791 KJV words and made G3056/H430... unfindable there.
+     *
+     * Write one row per number, all over the same word range and gloss, content
+     * words first so the primary (first-stored) row is the content word; the
+     * reader demotes later rows over a claimed range to extra Strong's chips.
+     * morphology and original_word are split per number when counts line up.
+     */
     bool insertInterlinearWord(int64_t verseId, const SwordCommon::InterlinearRecord& word) {
+        std::vector<std::string> numbers;
+        {
+            std::istringstream in(word.allStrongs);
+            for (std::string n; in >> n;) numbers.push_back(n);
+        }
+        if (numbers.size() < 2) return insertInterlinearRow(verseId, word, "");
+
+        std::vector<std::string> morphs;
+        {
+            std::istringstream in(word.morphology);
+            for (std::string m; in >> m;) morphs.push_back(m);
+        }
+        std::vector<size_t> order;
+        for (size_t i = 0; i < numbers.size(); i++) if (!isFunctionStrongs(numbers[i])) order.push_back(i);
+        for (size_t i = 0; i < numbers.size(); i++) if (isFunctionStrongs(numbers[i])) order.push_back(i);
+
+        bool ok = true;
+        for (size_t k = 0; k < order.size(); k++) {
+            const size_t i = order[k];
+            SwordCommon::InterlinearRecord row = word;
+            row.strongsNumber = numbers[i];
+            if (morphs.size() == numbers.size()) row.morphology = morphs[i];
+            if (word.originalWords.size() == numbers.size()) row.originalWord = word.originalWords[i];
+            // Only the first row keeps the full list in metadata, as before.
+            ok = insertInterlinearRow(verseId, row, k == 0 ? word.allStrongs : "") && ok;
+        }
+        return ok;
+    }
+
+    bool insertInterlinearRow(int64_t verseId, const SwordCommon::InterlinearRecord& word,
+                              const std::string& allStrongs) {
         const char* sql = R"SQL(
             INSERT INTO interlinear_word (
                 verse_id, word_position_start, word_position_end,
@@ -1761,8 +1814,8 @@ private:
         }
 
         std::string metadata;
-        if (!word.allStrongs.empty() && word.allStrongs != word.strongsNumber) {
-            metadata = "{\"strongs\":\"" + SwordCommon::jsonEscape(word.allStrongs) + "\"}";
+        if (!allStrongs.empty() && allStrongs != word.strongsNumber) {
+            metadata = "{\"strongs\":\"" + SwordCommon::jsonEscape(allStrongs) + "\"}";
         }
 
         sqlite3_bind_int64(stmt, 1, verseId);
