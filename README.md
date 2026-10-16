@@ -151,3 +151,18 @@ GPL-3.0-or-later; see `LICENSE`.
 
 ## Technical Notes
   * Written using Claude Code
+
+## Converter source-defect fixes (task 0172)
+
+The SWORD converters repair known defects in the CrossWire sources. Build a module with these in mind:
+
+- `sword2commentary --drop-cross-chapter-links` (opt-in): the source index of **Wesley, Geneva, Family, Lightfoot,
+  QuotingPassages and Scofield** points the opening verse(s) of a chapter at the previous chapter's last note
+  (Wesley Ps 23:1 -> the Ps 22:31 record). The flag drops those repeated notes. Do **not** use it for
+  Luther, whose multi-chapter ranges are genuine, or for Barnes, Clarke, MHC, TSK (clean).
+- `sword2commentary` always skips Luther's "No Commentary on these verses is yet included" placeholder page.
+- `sword2bible` writes one `interlinear_word` row per Strong's number of a `<w>` (content word first, article
+  G3588 / object marker H853 last); it also keeps `<transChange>` boundaries as word breaks ("madethe" in ASV, RWebster).
+- `sword2dictionary` drops the duplicated Easton heading, the legacy-font `<orth>` token in Strong's Greek, and
+  transcodes Windows-1252 bytes in entry keys (2BabDict, AmTract).
+- All converters map U+07F4 in `.conf` text (Nave, ASV, CPDV) to U+2019.

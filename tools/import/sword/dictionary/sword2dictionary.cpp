@@ -455,7 +455,11 @@ bool convertEntries(SWModule* module) {
         // renderText() returns SWBuf BY VALUE; binding it to a `const char*`
         // leaves a dangling pointer once the temporary dies. Hold the buffer.
         const sword::SWBuf renderedBuf = module->renderText();
-        const std::string entryKey = keyRaw ? std::string(keyRaw) : std::string();
+        // Entry keys come straight from the module's index, not through the OSIS
+        // pipeline; 2BabDict and AmTract carry Windows-1252 apostrophes (0x92)
+        // there ("ABRAHAM\x92S BOSOM"), which is invalid UTF-8 in the database.
+        std::string entryKey = keyRaw ? std::string(keyRaw) : std::string();
+        if (!SwordCommon::isValidUtf8(entryKey)) entryKey = SwordCommon::latin1ToUtf8(entryKey);
         const std::string text = repairRenderedEntryStart(
             renderedBuf.length() ? std::string(renderedBuf.c_str()) : std::string());
 

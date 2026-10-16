@@ -6,7 +6,7 @@ set -e
 echo "Converting Wesley commentary module..."
 echo ""
 
-./sword2commentary --input ../test/data/Wesley.zip --output commentary_wesley.db
+./sword2commentary --input ../test/data/Wesley.zip --output commentary_wesley.db --drop-cross-chapter-links
 
 echo ""
 echo "Conversion complete!"

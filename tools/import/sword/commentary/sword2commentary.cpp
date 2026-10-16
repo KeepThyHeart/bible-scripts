@@ -365,6 +365,7 @@ bool convertEntries(SWModule* module) {
     std::string lastText;
     int64_t lastChapterKey = -1;      // verse id / 1000: book + chapter
     int chapterLinkSkipped = 0;
+    int placeholderSkipped = 0;
 
     (*vk) = sword::TOP;
     vk->setIntros(false);
@@ -415,6 +416,16 @@ bool convertEntries(SWModule* module) {
                     std::cout << "  Detected verse duplication (looping), stopping iteration\n";
                     break;
                 }
+                (*vk)++;
+                continue;
+            }
+            // Luther's source fills every verse it has no note for with a
+            // placeholder page ("No Commentary on these verses is yet included
+            // ... This module currently includes commentaries on: ..."), 15,582
+            // of its 31,087 entries. It is not commentary; the verse simply has
+            // no note, so store nothing.
+            if (text.find("No Commentary on these verses is yet included") != std::string::npos) {
+                placeholderSkipped++;
                 (*vk)++;
                 continue;
             }
@@ -472,6 +483,10 @@ bool convertEntries(SWModule* module) {
     sqlite3_exec(db, "COMMIT", nullptr, nullptr, nullptr);
 
     std::cout << "\n  Total entries: " << entryCount << "\n";
+    if (placeholderSkipped > 0) {
+        std::cout << "  Skipped " << placeholderSkipped
+                  << " \"No Commentary on these verses\" placeholder entries\n";
+    }
     if (chapterLinkSkipped > 0) {
         std::cout << "  Skipped " << chapterLinkSkipped
                   << " chapter-boundary links (opening verses repeating the previous chapter's last note)\n";
