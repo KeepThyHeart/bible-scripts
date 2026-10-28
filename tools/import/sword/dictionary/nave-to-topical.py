@@ -20,7 +20,8 @@ Structure recovered from the SWORD text (it carries no explicit depth):
   <lb/>N. sense          level 1 (or child of a refless, listless "->" heading)
   <lb/>text              item-level line outside a <list>
   <list><item>..         children of the line before the list
-  " .text" / <lb/>.text  "." is Nave's indent marker: text is one level deeper,
+  <lb/>.text             "." line start: a turnover line, kept as a sibling of the items before it
+  " .text" inside a line "." is Nave's indent marker: text is one level deeper,
                          a child of the item before it
   refless item (not "See")  a sub-heading: the items after it, up to the next
                          refless item or "See" item, are its children
@@ -98,6 +99,8 @@ VS = r'\d+(?:-\d+)?(?:,\d+(?:-\d+)?)*'
 SUFFIX = re.compile(r'^:(' + VS + ')')
 SUFFIX2 = re.compile(r'^(Ch|Ki)\s+(\d+):(' + VS + ')')
 # plain-text continuation the source left without a <ref>: "...</ref>; 34:14."
+SPLITBOOK = re.compile(r'^(Ch|Ki|Sa|Co|Th|Ti|Pe|Jo)\s+(\d+):(' + VS + ')')
+SPLITBOOK_MAP = {'Ch': 'Chr', 'Ki': 'Kgs', 'Sa': 'Sam', 'Co': 'Cor', 'Th': 'Thess', 'Ti': 'Tim', 'Pe': 'Pet', 'Jo': 'John'}
 CONT = re.compile(r'^;\s*(\d+):(' + VS + ')')
 
 
@@ -114,9 +117,16 @@ def _verses(book, ch, spec):
 
 def apply_fix(fix, t):
     """Replace the wrong osisRef (last in the list) by the real ones from the text after it."""
-    reflist, osis = fix
+    reflist, osis, display = fix
     if not reflist or reflist[-1] != osis:
         return t
+    # "<ref>Ezra 1</ref>Ch 4:17": the book's number prefix ended up inside the ref text
+    dm = re.search(r'\s([123])$', display or '')
+    m = SPLITBOOK.match(t) if dm else None
+    if m:
+        book = dm.group(1) + SPLITBOOK_MAP[m.group(1)]
+        reflist.pop(); reflist.extend(_verses(book, int(m.group(2)), m.group(3)))
+        return t[m.end():]
     if osis.split('.')[0] in ('Obad', 'Phlm', '2John', '3John', 'Jude'):
         m = SUFFIX.match(t)
         if m:
@@ -172,7 +182,7 @@ def parse_entry(key, body, refs):
     if not m:
         return entry
     st = {'section': entry, 'arrow': None, 'pp': entry, 'last': entry, 'adopter': None,
-          'owner': None, 'saved_pp': None, 'maybe_pp': None}
+          'owner': None, 'saved_pp': None, 'maybe_pp': None, 'pp_adopted': False}
 
     def add(parent, name, orefs):
         n = Node(name); n.refs = orefs; parent.kids.append(n); st['last'] = n
@@ -193,7 +203,7 @@ def parse_entry(key, body, refs):
                 par.refs += rs
                 continue
             if re.match(r'(?i)see\b', name) and i == 0:
-                tgt = clean(re.sub(r'(?i)^see\s+(the\s+)?', '', name))
+                tgt = clean(re.sub(r'(?i)^see[,\s]+(the\s+)?', '', name))
                 for part in re.split(r'\s*\.\s*See\s+', tgt):
                     par.see.append(part.strip(' .'))
                 par.refs += rs
@@ -218,22 +228,24 @@ def parse_entry(key, body, refs):
         elif kind == 'num':
             a = st['arrow']
             parent = a if (a is not None and not a.refs and not a.had_list and not a.see) else entry
-        elif kind == 'dot':
-            parent = st['last'] if st['last'] is not entry else entry
         else:
             parent = st['pp']
+        adopted = False
         if kind == 'plain' and st['maybe_pp'] is not None:
-            parent = st['pp'] = st['maybe_pp']
+            parent = st['pp'] = st['maybe_pp']; adopted = True
         st['maybe_pp'] = None
         first, last = attach(parent, segs, kind)
         if first is None:  # only a See line / refs-only line: its list belongs to the section
             st['owner'] = st['section'] if st['section'] is not None else entry
             return st['owner']
         if kind == 'arrow':
-            st['arrow'] = first; st['section'] = first; st['pp'] = first
+            st['arrow'] = first; st['section'] = first; st['pp'] = first; st['pp_adopted'] = False
         elif kind == 'num':
-            st['section'] = first; st['pp'] = first
-        st['owner'] = last
+            st['section'] = first; st['pp'] = first; st['pp_adopted'] = False
+        # a plain line adopted by a trailing refless item: its list is a sibling group under the adopter,
+        # not a child of the line (else every list/line round nests one level deeper)
+        st['owner'] = parent if (adopted or st['pp_adopted']) and kind == 'plain' else last
+        st['pp_adopted'] = adopted or (st['pp_adopted'] and kind == 'plain')
         return last
 
     def item(segs):
@@ -242,7 +254,9 @@ def parse_entry(key, body, refs):
             return
         first_txt = clean(segs.s[0][0])
         if re.match(r'(?i)see\b', first_txt):
-            attach(owner, segs, 'item'); st['adopter'] = None; return
+            ad = st['adopter']
+            attach(ad if (ad is not None and not ad.kids) else owner, segs, 'item')   # "Joy of" + "See JOY"
+            st['adopter'] = None; return
         ad = st['adopter']
         if ad is not None and len(ad.kids) >= GROUP_LIMITS.get((entry.name, ad.name), 10 ** 9):
             ad = st['adopter'] = None
@@ -284,7 +298,7 @@ def parse_entry(key, body, refs):
             if mode == 'item':
                 ad = st['adopter']
                 st['pp'] = ad if (ad is not None and ad.kids) else st['saved_pp']
-                st['maybe_pp'] = ad if (ad is not None and not ad.kids) else None
+                st['maybe_pp'] = ad if (ad is not None and not ad.kids and not st['pp_adopted']) else None
                 st['adopter'] = None; mode = 'line'
             continue
         if t == '<item>':
@@ -301,7 +315,7 @@ def parse_entry(key, body, refs):
         if t.startswith('<ref'):
             mo = re.search(r'osisRef="([^"]*)"', t)
             segs.ref(mo.group(1) if mo else None)
-            lastfix = (segs.s[-1][1], mo.group(1)) if mo and FIXABLE.match(mo.group(1)) else None
+            lastfix = (segs.s[-1][1], mo.group(1), re.sub(r'<[^>]*>', '', t)) if mo and FIXABLE.match(mo.group(1)) else None
             if not mo:
                 # <ref target="Nave:X">X</ref>: part of a "See X" name, keep its text
                 segs.s[-1][2] = False

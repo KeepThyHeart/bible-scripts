@@ -60,7 +60,7 @@ class NaveBuilder(unittest.TestCase):
 
     def test_dot_marker_is_one_level_deeper_and_removed(self):
         self.assertEqual(self.q("SELECT count(*) FROM topic WHERE name LIKE '.%'")[0][0], 0)
-        self.assertIn('Appears to the disciples', self.kids('Birth of'))
+        self.assertIn('Appears to the disciples', self.kids('HISTORY OF'))
 
     def test_chapter_only_reference_covers_chapter(self):
         self.assertEqual(self.links('Besieged'), [(6006001, 6006027)])
