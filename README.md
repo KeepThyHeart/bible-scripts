@@ -166,3 +166,23 @@ The SWORD converters repair known defects in the CrossWire sources. Build a modu
 - `sword2dictionary` drops the duplicated Easton heading, the legacy-font `<orth>` token in Strong's Greek, and
   transcodes Windows-1252 bytes in entry keys (2BabDict, AmTract).
 - All converters map U+07F4 in `.conf` text (Nave, ASV, CPDV) to U+2019.
+
+### Nave's Topical Bible (`topical_nave.db`)
+
+`tools/import/sword/dictionary/nave-to-topical.py` builds `topical_nave.db` from the
+CrossWire `Nave` module (the original builder was not kept). It is a Python script, not a C++
+converter, because the output is a topical index, not a SWORD-shaped dictionary:
+
+```bash
+unzip Nave.zip -d nave && (cd nave && mod2imp Nave > ../nave.imp)   # SWORD utilities
+python3 tools/import/sword/dictionary/nave-to-topical.py --imp nave.imp \
+    --template <existing topical_nave.db> --output topical_nave.db
+python3 -I tools/import/sword/dictionary/test_nave_to_topical.py    # self-test
+```
+
+It nests sub-entries (`->` headings, numbered senses, `<list>` items, the `.` indent marker),
+expands chapter-only references ("Jos 6" is the whole chapter, not verse 1), repairs the
+single-chapter-book references ("Jude 1" followed by ":14" in the text), turns "See ..." into
+descriptions and maps U+07F4 to U+2019. The SWORD text has no explicit depth, so refless
+sub-headings adopt the items after them (see `GROUP_LIMITS` for the one hand-set cut).
+`validate-module.js` does not cover topical modules yet (it requires v0.2 `module_info.compression`).
