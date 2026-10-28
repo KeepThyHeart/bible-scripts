@@ -551,11 +551,12 @@ async function checkCompressionAndDigest(db, tableNames, moduleType, result, isV
       `table at all (§2.2, §2.8).`));
   }
 
-  const shapes = DIGEST_CONTENT_MAP[moduleType];
+  const digestType = moduleType === 'topical' ? 'topical_index' : moduleType;
+  const shapes = DIGEST_CONTENT_MAP[digestType];
   if (shapes && info.content_sha256) {
     let recomputed;
     try {
-      recomputed = await computeContentSha256(db, moduleType, { compression, dictionary });
+      recomputed = await computeContentSha256(db, digestType, { compression, dictionary });
     } catch (e) {
       result.errors.push(err('digest_recompute_failed',
         `Could not recompute content_sha256: ${e.message}`));

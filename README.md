@@ -176,7 +176,7 @@ converter, because the output is a topical index, not a SWORD-shaped dictionary:
 ```bash
 unzip Nave.zip -d nave && (cd nave && mod2imp Nave > ../nave.imp)   # SWORD utilities
 python3 tools/import/sword/dictionary/nave-to-topical.py --imp nave.imp \
-    --template <existing topical_nave.db> --output topical_nave.db
+    --template <official v0.2 topical_nave.db> --output topical_nave.db
 python3 -I tools/import/sword/dictionary/test_nave_to_topical.py    # self-test
 ```
 
@@ -185,4 +185,8 @@ expands chapter-only references ("Jos 6" is the whole chapter, not verse 1), rep
 single-chapter-book references ("Jude 1" followed by ":14" in the text), turns "See ..." into
 descriptions and maps U+07F4 to U+2019. The SWORD text has no explicit depth, so refless
 sub-headings adopt the items after them (see `GROUP_LIMITS` for the one hand-set cut).
-`validate-module.js` does not cover topical modules yet (it requires v0.2 `module_info.compression`).
+The output is the app's format v0.2 (`topical_index`; the schema is copied from the `--template`,
+the official published file, so it matches it exactly, with the same `module_uuid`). It bumps
+`content_version` to 1.1 and sets `content_sha256` with the v0.2 formula (`topic.name` and
+`topic.content` by `topic_id`; `scripts/lib/content-digest.js`). `validate-module.js` checks it,
+including the digest.

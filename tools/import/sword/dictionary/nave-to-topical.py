@@ -11,9 +11,13 @@ Usage:
     python3 nave-to-topical.py --imp nave.imp --template topical_nave.db \
         --output out/topical_nave.db [--report report.json]
 
-The --template is an existing topical_nave.db: its schema and module_info row are
-reused (uuid, description, licence), so identity stays stable. Without it the
-script cannot build the database (there is no standalone schema copy).
+The --template is the official format-v0.2 topical_nave.db (download it from
+https://modules.bible.keepthyheart.com/modules/en/topical/topical_nave.db.gz): its
+schema (topic, verse_link, module_feature, module_info, compression_dictionary,
+schema_version) and module_info row are reused as they are (module_uuid, description,
+licence), so identity and format stay identical. Only content_version (1.1),
+content_sha256, created_date and metadata change. The output is uncompressed
+(compression 'none', as the official file). There is no FTS table in v0.2 topical.
 
 Structure recovered from the SWORD text (it carries no explicit depth):
   <lb/>-> HEADING        level 1, child of the entry
@@ -30,7 +34,7 @@ Structure recovered from the SWORD text (it carries no explicit depth):
                          metadata.seeAlso
   "(See each one ...)"   a note after a heading: becomes its description
 """
-import argparse, hashlib, html, json, os, re, sqlite3, sys
+import argparse, datetime, hashlib, html, json, os, re, sqlite3, struct, sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 VERS = os.path.join(HERE, '..', '..', '..', '..', 'scripts', 'data', 'kjv-versification.json')
@@ -367,6 +371,7 @@ def main():
     ap.add_argument('--template', required=True)
     ap.add_argument('--output', required=True)
     ap.add_argument('--report')
+    ap.add_argument('--content-version', default='1.1')
     a = ap.parse_args()
 
     txt = open(a.imp, encoding='utf-8').read()
@@ -396,9 +401,8 @@ def main():
     cur = out.cursor()
     cur.execute('DELETE FROM verse_link'); cur.execute('DELETE FROM topic')
     cur.execute("DELETE FROM sqlite_sequence WHERE name IN ('topic','verse_link')")
-    cur.execute("INSERT INTO topic_fts(topic_fts) VALUES('rebuild')")
 
-    nlinks = 0; ntopics = 0; digest = hashlib.sha256()
+    nlinks = 0; ntopics = 0
 
     def emit(n, parent, sort):
         nonlocal nlinks, ntopics
@@ -406,7 +410,6 @@ def main():
         cur.execute('INSERT INTO topic(parent_topic_id,name,description,sort_order,metadata) VALUES (?,?,?,?,?)',
                     (parent, n.name, n.desc, sort, md))
         tid = cur.lastrowid; ntopics += 1
-        digest.update(f'T{tid}|{parent}|{n.name}|{n.desc}|{sort}|{md}\n'.encode())
         seen = set(); so = 0
         for osis in n.refs:
             r = R.parse(osis)
@@ -416,23 +419,37 @@ def main():
             cur.execute("INSERT INTO verse_link(source_type,source_id,verse_id_start,verse_id_end,link_type,sort_order) VALUES ('topic',?,?,?,'reference',?)",
                         (tid, r[0], r[1], so))
             nlinks += 1
-            digest.update(f'L{tid}|{r[0]}|{r[1]}|{so}\n'.encode())
         for j, k in enumerate(n.kids):
             emit(k, tid, j + 1)
 
     for i, e in enumerate(entries):
         emit(e, None, i + 1)
 
-    fix = lambda s: s.replace('ߴ', '’') if isinstance(s, str) else s
+    # content_sha256 as the v0.2 tooling computes it (scripts/lib/content-digest.js,
+    # CONTENT_MAP.topical_index): per topic by topic_id, u64le(id) then name and content,
+    # each 0x00 if NULL else 0x01 + u64le(byte length) + bytes; 0x1E closes the table.
+    digest = hashlib.sha256()
+    for tid, name, content in cur.execute('SELECT topic_id, name, content FROM topic ORDER BY topic_id').fetchall():
+        digest.update(struct.pack('<Q', tid))
+        for v in (name, content):
+            if v is None:
+                digest.update(b'\x00')
+            else:
+                b = v.encode('utf-8')
+                digest.update(b'\x01' + struct.pack('<Q', len(b)) + b)
+    digest.update(b'\x1e')
+
+    fix = lambda s: s.replace('\u07f4', '\u2019') if isinstance(s, str) else s
     row = cur.execute('SELECT * FROM module_info WHERE info_id=1').fetchone()
     cols = [d[0] for d in cur.description]
     upd = {c: fix(v) for c, v in zip(cols, row)}
-    upd['topic_count'] = ntopics; upd['verse_count'] = nlinks
+    upd['content_version'] = a.content_version
     upd['content_sha256'] = digest.hexdigest()
-    upd['metadata'] = json.dumps({'source_module': 'Nave (CrossWire SWORD)', 'builder': 'nave-to-topical.py'})
+    upd['created_date'] = datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%d %H:%M:%S')
+    upd['metadata'] = json.dumps({'source_module': 'Nave (CrossWire SWORD)', 'builder': 'nave-to-topical.py',
+                                  'topic_count': ntopics, 'verse_count': nlinks}, ensure_ascii=False, separators=(',', ':'))
     cur.execute('UPDATE module_info SET ' + ','.join(f'{c}=?' for c in upd if c != 'info_id') + ' WHERE info_id=1',
                 [v for c, v in upd.items() if c != 'info_id'])
-    cur.execute("INSERT INTO schema_version(version_number,notes) VALUES ('2.0.1','Rebuilt by nave-to-topical.py: nested sub-entries, chapter-only refs expanded')")
     out.commit()
     out.execute('PRAGMA journal_mode=DELETE')
     cur.execute('VACUUM')

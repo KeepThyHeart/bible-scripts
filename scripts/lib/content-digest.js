@@ -47,6 +47,9 @@ const CONTENT_MAP = {
   }],
   book: [{ table: 'book_section', rowid: 'section_id', prose: ['content'], indexed: ['title', 'content'] }],
   devotional: [{ table: 'devotional_entry', rowid: 'entry_id', prose: ['content'], indexed: ['title', 'content'] }],
+  // Mirrors CONTENT_MAP.topical_index in the Bible repo (ModuleFormat.ts): the topic table's
+  // name + content; descriptions, hierarchy and verse links are not part of the digest.
+  topical_index: [{ table: 'topic', rowid: 'topic_id', prose: [], indexed: ['name', 'content'] }],
 };
 
 const TABLE_SEPARATOR = Buffer.from([0x1e]);

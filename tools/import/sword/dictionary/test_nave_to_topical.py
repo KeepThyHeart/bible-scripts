@@ -17,13 +17,11 @@ $$$ABARIM
 def make_template(path):
     c = sqlite3.connect(path)
     c.executescript("""
-    CREATE TABLE module_info (info_id INTEGER PRIMARY KEY, full_name TEXT, description TEXT, topic_count INTEGER,
-      verse_count INTEGER, content_sha256 TEXT, metadata TEXT);
-    INSERT INTO module_info VALUES (1, 'Naveߴs Topical Bible', 'x', 0, 0, NULL, NULL);
+    CREATE TABLE module_info (info_id INTEGER PRIMARY KEY, full_name TEXT, description TEXT,
+      content_version TEXT, content_sha256 TEXT, created_date TEXT, metadata TEXT);
+    INSERT INTO module_info VALUES (1, 'Naveߴs Topical Bible', 'x', '1.0', NULL, NULL, NULL);
     CREATE TABLE topic (topic_id INTEGER PRIMARY KEY AUTOINCREMENT, parent_topic_id INTEGER, name TEXT NOT NULL,
-      description TEXT, sort_order INTEGER NOT NULL DEFAULT 0, metadata TEXT);
-    CREATE VIRTUAL TABLE topic_fts USING fts5(name, content='topic', content_rowid='topic_id');
-    CREATE TRIGGER topic_fts_insert AFTER INSERT ON topic BEGIN INSERT INTO topic_fts(rowid, name) VALUES (new.topic_id, new.name); END;
+      description TEXT, content TEXT, sort_order INTEGER, metadata TEXT);
     CREATE TABLE schema_version (version_id INTEGER PRIMARY KEY AUTOINCREMENT, version_number TEXT, applied_date TEXT, notes TEXT, metadata TEXT);
     CREATE TABLE verse_link (link_id INTEGER PRIMARY KEY AUTOINCREMENT, source_type TEXT NOT NULL, source_id INTEGER NOT NULL,
       verse_id_start INTEGER NOT NULL, verse_id_end INTEGER NOT NULL, link_type TEXT NOT NULL DEFAULT 'reference',
@@ -75,7 +73,10 @@ class NaveBuilder(unittest.TestCase):
 
     def test_apostrophe_repaired_and_counts(self):
         self.assertEqual(self.q('SELECT full_name FROM module_info')[0][0], 'Nave’s Topical Bible')
-        self.assertEqual(self.q('SELECT topic_count FROM module_info')[0][0], self.q('SELECT count(*) FROM topic')[0][0])
+        self.assertEqual(json.loads(self.q('SELECT metadata FROM module_info')[0][0])['topic_count'],
+                         self.q('SELECT count(*) FROM topic')[0][0])
+        self.assertEqual(self.q('SELECT content_version FROM module_info')[0][0], '1.1')
+        self.assertEqual(len(self.q('SELECT content_sha256 FROM module_info')[0][0]), 64)
 
 
 if __name__ == '__main__':
