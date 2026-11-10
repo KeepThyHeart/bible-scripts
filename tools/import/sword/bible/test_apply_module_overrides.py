@@ -32,6 +32,37 @@ def make_db(path, abbreviation='OCCB', language='zh', text='plain'):
     con.close()
 
 
+def make_commentary_db(path):
+    if os.path.exists(path):
+        os.remove(path)
+    con = sqlite3.connect(path)
+    con.executescript('''
+        CREATE TABLE module_info (info_id INTEGER PRIMARY KEY, module_uuid TEXT, module_type TEXT, abbreviation TEXT,
+            full_name TEXT, author TEXT, publisher TEXT, year_published INTEGER, description TEXT, language_code TEXT,
+            copyright TEXT, license_spdx TEXT, license_url TEXT, source_url TEXT, metadata TEXT);
+        CREATE TABLE commentary_entry (entry_id INTEGER PRIMARY KEY, content TEXT);
+    ''')
+    con.execute("INSERT INTO module_info (info_id, module_uuid, module_type, abbreviation, full_name, language_code) "
+                "VALUES (1, 'x', 'commentary', 'TN-AR', 'Notes', 'ar')")
+    con.execute("INSERT INTO commentary_entry VALUES (1, 'a Biblica\u00ae note')")
+    con.commit()
+    con.close()
+
+
+class ApplyOverridesTypeTest(unittest.TestCase):
+    def test_uuid_uses_module_type_and_forbid_checks_commentary(self):
+        with tempfile.TemporaryDirectory() as d:
+            db = os.path.join(d, 'c.db')
+            make_commentary_db(db)
+            problems = overrides.apply_overrides(db, {'columns': {'abbreviation': 'TN-AR2'},
+                                                      'forbid_text': ['Biblica\u00ae']})
+            con = sqlite3.connect(db)
+            uuid = con.execute('SELECT module_uuid FROM module_info').fetchone()[0]
+            con.close()
+            self.assertEqual(uuid, overrides.deterministic_uuid('commentary:tn-ar2:ar'))
+            self.assertTrue(any('commentary entry' in p for p in problems))
+
+
 class ApplyOverridesTest(unittest.TestCase):
     def setUp(self):
         self.dir = tempfile.TemporaryDirectory()

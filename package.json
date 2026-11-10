@@ -5,7 +5,8 @@
   "description": "Scratch Bible data tools: SWORD import, module verification and database probes",
   "license": "GPL-3.0-or-later",
   "scripts": {
-    "test": "node scripts/query/db-cli.test.js"
+    "test": "node scripts/query/db-cli.test.js && npm run test:py",
+    "test:py": "python3 -m unittest discover -s tools/import/door43 -t tools/import/door43 -p 'test_*.py' && python3 -m unittest discover -s tools/import/sword/bible -p 'test_*.py'"
   },
   "dependencies": {
     "sqlite3": "^5.1.7"

@@ -1,0 +1,16 @@
+{
+ "$comment": [
+  "ufw (unfoldingWord) -> KJV-English verse map for Door43 resources declaring versification: ufw.",
+  "Rule format as versification-mt-to-kjv.json: {b,c,from,to,dc,off}; `off` is added to the verse number, `dc` is the destination chapter.",
+  "`merges` mirror VARIANT_VERSE_MAP in sword2bible.cpp: the source verse is folded into a KJV host verse (prefix=true puts it before the host's own text).",
+  "Evidence (samples 2026-11-10): ufw OT is English-shaped (Joel 3 chapters 20/32/21, Obadiah 21); the NT follows the critical text, so 3JN has 15 verses and Rev 12 has 18.",
+  "Anything outside the rules that is not a KJV address raises UnmappedVerse. TODO: derive_versification script (subtask D3) not written; rules here are the pragmatic section 5.1 set."
+ ],
+ "versification": "ufw",
+ "target": "kjv-english",
+ "rules": [],
+ "merges": [
+  {"b": 64, "c": 1, "v": 15, "into_c": 1, "into_v": 14, "prefix": false, "note": "critical-text 3 John 15 = second half of KJV 3 John 14"},
+  {"b": 66, "c": 12, "v": 18, "into_c": 13, "into_v": 1, "prefix": true, "note": "NA/UBS Rev 12:18 = KJV Rev 13:1a"}
+ ]
+}

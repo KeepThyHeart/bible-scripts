@@ -81,6 +81,7 @@ const CONTENT_TABLES = {
   dictionary: ['dictionary_entry'],
   lexicon: ['dictionary_entry'],   // a lexicon is a dictionary-shaped module
   book: ['book_section'],
+  quiz: ['quiz_question'],
   devotional: ['devotional_entry'],
   topical: ['topic'],
   xref: ['cross_reference_group'],
@@ -277,6 +278,7 @@ function detectModuleType(tableNames) {
   if (tableNames.has('commentary_entry')) return 'commentary';
   if (tableNames.has('dictionary_entry')) return 'dictionary';
   if (tableNames.has('book_section')) return 'book';
+  if (tableNames.has('quiz_question')) return 'quiz';
   if (tableNames.has('devotional_entry')) return 'devotional';
   if (tableNames.has('topic')) return 'topical';
   if (tableNames.has('cross_reference_group')) return 'xref';

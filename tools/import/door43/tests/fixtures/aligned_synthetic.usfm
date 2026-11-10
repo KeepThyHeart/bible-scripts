@@ -1,0 +1,18 @@
+\id TST synthetic fixture
+\ide UTF-8
+\h Test
+\mt1 Test Book
+\c 1
+\s1 A heading
+\p
+\v 1 L’\zaln-s |x-strong="G4245" x-lemma="aa" x-morph="Gr,NS,,,,NMSC" x-occurrence="1" x-occurrences="1" x-content="alpha"\*\w ancien|x-occurrence="1" x-occurrences="1"\w*\zaln-e\*, to \zaln-s |x-strong="G00270" x-lemma="bb" x-morph="Gr,N" x-occurrence="1" x-occurrences="1" x-content="beta"\*\zaln-s |x-strong="G1050" x-lemma="cc" x-morph="Gr,N" x-occurrence="1" x-occurrences="1" x-content="gamma"\*\w the|x-occurrence="1" x-occurrences="1"\w*
+\w friend|x-occurrence="1" x-occurrences="1"\w*\zaln-e\*\zaln-e\*.\f + \fr 1.1 \ft a note\f*
+\v 2 \zaln-s |x-strong="b:H3117" x-lemma="yom" x-morph="He,Ncmsc" x-occurrence="1" x-occurrences="2" x-content="day"\*\w one|x-occurrence="1" x-occurrences="1"\w*\zaln-e\* and \zaln-s |x-strong="l" x-lemma="le" x-morph="He,R" x-occurrence="1" x-occurrences="1" x-content="to"\*\w two|x-occurrence="1" x-occurrences="1"\w*\zaln-e\* mid \zaln-s |x-strong="b:H3117" x-lemma="yom" x-morph="He,Ncmsc" x-occurrence="1" x-occurrences="2" x-content="day"\*\w three|x-occurrence="1" x-occurrences="1"\w*\zaln-e\*\x - \xo 1.2 \xt Gen 1\x*
+\c 2
+\d Superscription text
+\q1
+\v 1 First \wj red words\wj* tail
+\q2 second line
+\v 2 \w Plain|x-occurrence="1" x-occurrences="1"\w* poetry continues
+\p
+\v 3-4 bridged verse

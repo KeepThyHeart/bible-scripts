@@ -1,0 +1,265 @@
+{
+ "$comment": "Pinned Door43 sources (design section 2). sha256 is written by the first fetch and enforced afterwards. zh: none released, skipped.",
+ "sources": [
+  {
+   "id": "tw-es",
+   "kind": "tw",
+   "owner": "es-419_gl",
+   "repo": "es-419_tw",
+   "tag": "v37",
+   "lang": "es",
+   "door43_lang": "es-419",
+   "sha256": null
+  },
+  {
+   "id": "tn-es",
+   "kind": "tn",
+   "owner": "es-419_gl",
+   "repo": "es-419_tn",
+   "tag": "v66",
+   "lang": "es",
+   "door43_lang": "es-419",
+   "sha256": null,
+   "note": "Rut Jon Tit 3Jn only"
+  },
+  {
+   "id": "tw-fr",
+   "kind": "tw",
+   "owner": "MVHS",
+   "repo": "fr_tw",
+   "tag": "v0.0.1",
+   "lang": "fr",
+   "door43_lang": "fr",
+   "sha256": null,
+   "note": "1006 articles; uW fr_tw v7.3 has 981"
+  },
+  {
+   "id": "tn-fr",
+   "kind": "tn",
+   "owner": "Xenizo",
+   "repo": "fr_tn",
+   "tag": "v2.0",
+   "lang": "fr",
+   "door43_lang": "fr",
+   "sha256": null
+  },
+  {
+   "id": "tw-hi",
+   "kind": "tw",
+   "owner": "translationCore-Create-BCS",
+   "repo": "hi_tw",
+   "tag": "v8",
+   "lang": "hi",
+   "door43_lang": "hi",
+   "sha256": null
+  },
+  {
+   "id": "tn-hi",
+   "kind": "tn",
+   "owner": "translationCore-Create-BCS",
+   "repo": "hi_tn",
+   "tag": "v9",
+   "lang": "hi",
+   "door43_lang": "hi",
+   "sha256": null
+  },
+  {
+   "id": "tq-hi",
+   "kind": "tq",
+   "owner": "translationCore-Create-BCS",
+   "repo": "hi_tq",
+   "tag": "v8",
+   "lang": "hi",
+   "door43_lang": "hi",
+   "sha256": null
+  },
+  {
+   "id": "obs-hi",
+   "kind": "obs",
+   "owner": "Door43-Catalog",
+   "repo": "hi_obs",
+   "tag": "v8.3",
+   "lang": "hi",
+   "door43_lang": "hi",
+   "sha256": null
+  },
+  {
+   "id": "tw-bn",
+   "kind": "tw",
+   "owner": "translationCore-Create-BCS",
+   "repo": "bn_tw",
+   "tag": "v4",
+   "lang": "bn",
+   "door43_lang": "bn",
+   "sha256": null
+  },
+  {
+   "id": "tn-bn",
+   "kind": "tn",
+   "owner": "translationCore-Create-BCS",
+   "repo": "bn_tn",
+   "tag": "v6",
+   "lang": "bn",
+   "door43_lang": "bn",
+   "sha256": null
+  },
+  {
+   "id": "tq-bn",
+   "kind": "tq",
+   "owner": "translationCore-Create-BCS",
+   "repo": "bn_tq",
+   "tag": "v2",
+   "lang": "bn",
+   "door43_lang": "bn",
+   "sha256": null
+  },
+  {
+   "id": "obs-bn",
+   "kind": "obs",
+   "owner": "Door43-Catalog",
+   "repo": "bn_obs",
+   "tag": "v4.4",
+   "lang": "bn",
+   "door43_lang": "bn",
+   "sha256": null
+  },
+  {
+   "id": "tw-ar",
+   "kind": "tw",
+   "owner": "BSOJ",
+   "repo": "ar_tw",
+   "tag": "v5",
+   "lang": "ar",
+   "door43_lang": "ar",
+   "sha256": null
+  },
+  {
+   "id": "tn-ar",
+   "kind": "tn",
+   "owner": "BSOJ",
+   "repo": "ar_tn",
+   "tag": "v6.1",
+   "lang": "ar",
+   "door43_lang": "ar",
+   "sha256": null
+  },
+  {
+   "id": "tq-ar",
+   "kind": "tq",
+   "owner": "BSOJ",
+   "repo": "ar_tq",
+   "tag": "v3.1",
+   "lang": "ar",
+   "door43_lang": "ar",
+   "sha256": null
+  },
+  {
+   "id": "obs-ar",
+   "kind": "obs",
+   "owner": "OBS-Aquifer",
+   "repo": "ar_obs",
+   "tag": "v1",
+   "lang": "ar",
+   "door43_lang": "ar",
+   "sha256": null
+  },
+  {
+   "id": "tw-pt",
+   "kind": "tw",
+   "owner": "Door43-Catalog",
+   "repo": "pt-br_tw",
+   "tag": "v6.4",
+   "lang": "pt",
+   "door43_lang": "pt-br",
+   "sha256": null
+  },
+  {
+   "id": "tn-pt",
+   "kind": "tn",
+   "owner": "Door43-Catalog",
+   "repo": "pt-br_tn",
+   "tag": "v7.1",
+   "lang": "pt",
+   "door43_lang": "pt-br",
+   "sha256": null,
+   "legacy_markdown": true
+  },
+  {
+   "id": "tq-pt",
+   "kind": "tq",
+   "owner": "Door43-Catalog",
+   "repo": "pt-br_tq",
+   "tag": "v9.2",
+   "lang": "pt",
+   "door43_lang": "pt-br",
+   "sha256": null,
+   "legacy_markdown": true
+  },
+  {
+   "id": "obs-pt",
+   "kind": "obs",
+   "owner": "Door43-Catalog",
+   "repo": "pt-br_obs",
+   "tag": "v3.2.3",
+   "lang": "pt",
+   "door43_lang": "pt-br",
+   "sha256": null
+  },
+  {
+   "id": "bible-ar-avd",
+   "kind": "bible",
+   "owner": "BSOJ",
+   "repo": "ar_avd",
+   "tag": "v6.9",
+   "lang": "ar",
+   "door43_lang": "ar",
+   "sha256": null,
+   "abbr_0220": "AVD"
+  },
+  {
+   "id": "bible-ar-nav",
+   "kind": "bible",
+   "owner": "BSOJ",
+   "repo": "ar_nav",
+   "tag": "v2",
+   "lang": "ar",
+   "door43_lang": "ar",
+   "sha256": null,
+   "abbr_0220": "NAV"
+  },
+  {
+   "id": "bible-hi-irv",
+   "kind": "bible",
+   "owner": "Door43-Catalog",
+   "repo": "hi_irv",
+   "tag": "v12",
+   "lang": "hi",
+   "door43_lang": "hi",
+   "sha256": null,
+   "abbr_0220": "IRV-HI"
+  },
+  {
+   "id": "bible-bn-irv",
+   "kind": "bible",
+   "owner": "Door43-Catalog",
+   "repo": "bn_irv",
+   "tag": "v5",
+   "lang": "bn",
+   "door43_lang": "bn",
+   "sha256": null,
+   "abbr_0220": "IRV-BN"
+  },
+  {
+   "id": "bible-fr-lsg",
+   "kind": "bible",
+   "owner": "MVHS",
+   "repo": "fr_lsg",
+   "tag": "v0.0.2",
+   "lang": "fr",
+   "door43_lang": "fr",
+   "sha256": null,
+   "abbr_0220": null,
+   "note": "NT only"
+  }
+ ]
+}

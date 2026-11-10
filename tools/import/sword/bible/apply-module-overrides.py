@@ -55,6 +55,16 @@ def deterministic_uuid(identity_key):
     return f'{u[0:8]}-{u[8:12]}-{u[12:16]}-{u[16:20]}-{u[20:32]}'
 
 
+# (table, text column, label) checked by forbid_text, per module type
+CONTENT_TEXT = [
+    ('bible_verse', 'text', 'verse'),
+    ('commentary_entry', 'content', 'commentary entry'),
+    ('dictionary_entry', 'definition', 'dictionary entry'),
+    ('book_section', 'content', 'book section'),
+    ('quiz_question', 'prompt', 'quiz prompt'),
+]
+
+
 def apply_overrides(db_path, entry, module_name=None):
     """Apply one override entry to the module at db_path. Returns the list of problems (empty = ok)."""
     unknown = set(entry.get('columns', {})) - set(COLUMNS)
@@ -74,7 +84,7 @@ def apply_overrides(db_path, entry, module_name=None):
             con.execute(f'UPDATE module_info SET {sets} WHERE info_id = 1', list(cols.values()))
 
         if 'abbreviation' in cols and cols['abbreviation'] != row['abbreviation']:
-            new_uuid = deterministic_uuid(f"bible:{cols['abbreviation'].lower()}:{row['language_code'].lower()}")
+            new_uuid = deterministic_uuid(f"{(row['module_type'] if 'module_type' in row.keys() else None) or 'bible'}:{cols['abbreviation'].lower()}:{row['language_code'].lower()}")
             con.execute('UPDATE module_info SET module_uuid = ? WHERE info_id = 1', (new_uuid,))
 
         extra = entry.get('metadata')
@@ -94,10 +104,13 @@ def apply_overrides(db_path, entry, module_name=None):
                 for bad in forbid:
                     if bad in value:
                         problems.append(f'module_info.{field} contains {bad!r}')
-            for bad in forbid:
-                n = con.execute('SELECT COUNT(*) FROM bible_verse WHERE instr(text, ?) > 0', (bad,)).fetchone()[0]
-                if n:
-                    problems.append(f'{n} verse(s) contain {bad!r}')
+            for table, column, label in CONTENT_TEXT:
+                if not con.execute("SELECT 1 FROM sqlite_master WHERE name = ?", (table,)).fetchone():
+                    continue
+                for bad in forbid:
+                    n = con.execute(f'SELECT COUNT(*) FROM {table} WHERE instr({column}, ?) > 0', (bad,)).fetchone()[0]
+                    if n:
+                        problems.append(f'{n} {label}(s) contain {bad!r}')
         return problems
     finally:
         con.close()
