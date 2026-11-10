@@ -22,8 +22,9 @@ This tool takes SWORD Bible module ZIP files (from [CrossWire](https://crosswire
 - **Structured spans:** presentation lives in `bible_verse.formatting` as data
   records naming word ranges (`divine_name`, `supplied`, `words_of_christ`,
   `emphasis`, `quotation`, `transliteration`) with **0-based inclusive** offsets
-- **Block properties:** `paragraph_start`, `poetry_level`, `heading`, `selah`,
-  taken from the source's own markers rather than inferred from presentation
+- **Block properties:** `paragraph_start`, `lines` (poetry), `heading`, taken
+  from the source's own markers rather than inferred from presentation; Selah is
+  a `musical_direction` span
 - **Variant verse divisions** (Rev 12:18, 3 John 15) are folded into their
   canonical host verse, with the source numbering preserved in
   `formatting.source_verses`
@@ -170,7 +171,8 @@ The converter performs these steps:
      `<divineName>` -> `divine_name`, `<transChange type="added">` -> `supplied`,
      `<q who="Jesus">` -> `words_of_christ`, `<reference osisRef=...>` ->
      `quotation` carrying the source `verse_id` in `ref`
-   - Lifts `<title>` into `block.heading`, `<l level>` into `block.poetry_level`,
+   - Lifts `<title>` into `block.heading`, `<l level>` into `block.lines` (one word range and
+     indent level per poetic line, together covering every word),
      and pilcrows into `block.paragraph_start`
    - Drops `<note>` content (footnotes are not verse text)
    - Counts words and inserts interlinear words at real 0-based word offsets
@@ -342,9 +344,31 @@ Span types and their USFM equivalents (canonical list in
 | `emphasis` | `\em` | `<hi type="emphasis">`, `<b>`, `<em>` |
 | `quotation` | `\qt` | `<q>`, `<cite>`, `<reference osisRef=...>` (fills `ref`) |
 | `transliteration` | `\tl` | `<foreign>`, `<translit>` |
+| `musical_direction` | `\qs` | `<seg type="x-selah">`, `<l type="selah">` |
 
-Block-level properties: `paragraph_start` (`\p`), `poetry_level` 1-3
-(`\q1`-`\q3`), `heading` (`\d`/`\s`), `selah` (`\qs`).
+Block-level properties: `paragraph_start` (`\p`), `lines` (`[{start, end, level}]`,
+level 1-3 = `\q1`-`\q3`; ordered, non-overlapping, covering every word of the
+verse; absent for prose), `heading` (`\d`/`\s`).
+
+Tag-shaped debris that survives entity decoding (`&lt;WAHb&gt;` in CUV Joshua
+24:14) is stripped from the text, because `bible_verse.text` must hold no markup.
+
+### Corrections after conversion (`apply-module-overrides.py`)
+
+The converter copies the `.conf`. When the `.conf` is wrong or incomplete for our
+purposes, a curated entry in `../data/module-overrides.json` (keyed by SWORD module
+name) corrects the finished database: licence the `.conf` states wrongly, a
+licence covering only part of the module (CUV text PD, its Strong's tags GNU FDL),
+the Biblica trademark that a CC BY-SA derivative must drop, attribution and
+change notices, and abbreviations that clash (the module UUID is recomputed from
+the new abbreviation).
+
+```bash
+./apply-module-overrides.py bible_xxx.db --module SwordName   # no entry: left as converted
+python3 -m unittest test_apply_module_overrides -v             # tests
+make -C ../common test                                         # parser tests
+```
+
 
 ### Known limitations
 
