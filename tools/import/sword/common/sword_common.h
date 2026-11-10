@@ -109,6 +109,7 @@ namespace SwordCommon {
      *   emphasis        \em   genuine emphasis in the source
      *   quotation       \qt   OT quotation in NT; `ref` carries the source verse_id
      *   transliteration \tl
+     *   musical_direction \qs  Selah, Higgaion
      */
     struct FormatSpan {
         std::string type;
@@ -118,21 +119,33 @@ namespace SwordCommon {
     };
 
     /**
-     * Block-level formatting for a verse.
+     * One poetic line inside a verse: `\q1`-`\q3`. `start`/`end` are 0-based
+     * inclusive word offsets into the verse's clean text.
+     */
+    struct PoetryLine {
+        int start = 0;
+        int end = 0;
+        int level = 1;   // 1..3
+    };
+
+    /**
+     * Block-level formatting for a verse (the `formatting.block` object of the
+     * module format).
      *
      *   paragraph_start  \p
-     *   poetry_level     \q1..\q3   (0 = prose)
+     *   lines            \q1..\q3   (empty = prose). Ordered, non-overlapping,
+     *                              and together covering every word of the verse.
      *   heading          \d / \s    (e.g. Psalm superscriptions)
-     *   selah            \qs
+     *
+     * Selah is not a block property: it is a `musical_direction` span.
      */
     struct BlockInfo {
         bool paragraphStart = false;
-        int  poetryLevel = 0;
+        std::vector<PoetryLine> lines;
         std::string heading;
-        bool selah = false;
 
         bool isEmpty() const {
-            return !paragraphStart && poetryLevel == 0 && heading.empty() && !selah;
+            return !paragraphStart && lines.empty() && heading.empty();
         }
     };
 

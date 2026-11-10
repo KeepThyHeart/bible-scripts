@@ -693,6 +693,32 @@ namespace SwordCommon {
 
     } // anonymous namespace
 
+    /**
+     * Remove tag-shaped debris ("<WAHb>", "</x>") that survived entity decoding.
+     *
+     * Some sources carry a placeholder as escaped text (ChiUn/ChiUns Joshua
+     * 24:14 has `&lt;WAHb&gt;` between characters). Once decoded it looks like
+     * markup, and bible_verse.text must not contain any. Only a '<' followed by
+     * an optional '/', a letter, and a short run of name characters up to '>'
+     * counts, so a lone '<' or a comparison in prose is left alone.
+     */
+    static void stripStrayTags(std::string& word) {
+        size_t pos = 0;
+        while ((pos = word.find('<', pos)) != std::string::npos) {
+            size_t j = pos + 1;
+            if (j < word.size() && word[j] == '/') j++;
+            const size_t nameStart = j;
+            while (j < word.size() && (std::isalnum(static_cast<unsigned char>(word[j]))
+                                       || word[j] == ':' || word[j] == '-' || word[j] == '_')) j++;
+            if (j > nameStart && std::isalpha(static_cast<unsigned char>(word[nameStart]))
+                && j - nameStart <= 24 && j < word.size() && word[j] == '>') {
+                word.erase(pos, j + 1 - pos);
+            } else {
+                pos++;
+            }
+        }
+    }
+
     OsisVerseResult parseOsisVerse(const std::string& osisInput) {
         const std::string osis = unescapeEscapedOsisMarkup(osisInput);
         OsisVerseResult result;
@@ -713,10 +739,17 @@ namespace SwordCommon {
         //  anything between    -> a mid-verse break, not expressible per verse
         int lastParagraphMarkerAt = -1;
 
+        // Poetic lines: the word index at which each <l> opened. Turned into
+        // `block.lines` ranges once the verse's final word count is known.
+        struct LineStart { int word; int level; bool selah; };
+        std::vector<LineStart> lineStarts;
+        bool lineGroupSeen = false;   // a non-milestone <lg> with no <l> inside
+
         // Emit the pending word, separated from the previous one by a single
         // space. This normalisation is what makes span offsets addressable:
         // splitting result.text on ' ' yields exactly result.wordCount words.
         auto flushWord = [&]() {
+            stripStrayTags(currentWord);
             if (currentWord.empty()) return;
             if (result.wordCount > 0) result.text += ' ';
             result.text += currentWord;
@@ -904,16 +937,15 @@ namespace SwordCommon {
                     continue;
                 }
                 if (name == "lg") {
-                    if (!closing && !selfClosing && result.block.poetryLevel == 0) {
-                        result.block.poetryLevel = 1;
-                    }
+                    if (!closing && !selfClosing) lineGroupSeen = true;
                     continue;
                 }
                 if (name == "l") {
+                    // <l eID=.../> closes a milestone-style line; only an
+                    // opening <l> (or <l sID=.../>) starts one.
+                    const bool endMilestone = !tagAttr(body, "eID").empty();
+                    flushWord();
                     if (!closing) {
-                        if (attrContains(type, "selah")) {
-                            result.block.selah = true;
-                        }
                         int level = 1;
                         const std::string levelAttr = tagAttr(body, "level");
                         if (!levelAttr.empty()) {
@@ -921,9 +953,18 @@ namespace SwordCommon {
                         }
                         if (level < 1) level = 1;
                         if (level > 3) level = 3;
-                        if (level > result.block.poetryLevel) result.block.poetryLevel = level;
-                    } else {
-                        flushWord();
+                        // An end milestone with no line open in this verse closes a
+                        // line that began in an earlier verse: this verse's words
+                        // are that line's continuation.
+                        if (endMilestone) {
+                            if (lineStarts.empty()) lineStarts.push_back({0, level, false});
+                            continue;
+                        }
+                        // A line that ended up with no words is replaced, not kept.
+                        if (!lineStarts.empty() && lineStarts.back().word == result.wordCount) {
+                            lineStarts.pop_back();
+                        }
+                        lineStarts.push_back({result.wordCount, level, attrContains(type, "selah")});
                     }
                     continue;
                 }
@@ -957,7 +998,7 @@ namespace SwordCommon {
                     }
                 } else if (name == "seg") {
                     if (attrContains(type, "selah")) {
-                        result.block.selah = true;
+                        spanType = "musical_direction";
                     }
                     // Alternate readings: <seg type="x-variant" subType="x-2">.
                     // libsword shows only the primary reading (x-1) by default
@@ -1126,6 +1167,37 @@ namespace SwordCommon {
 
         flushWord();
 
+        // Poetic lines: each runs from its own start to the word before the
+        // next one's, the first is stretched back to word 0 and the last forward
+        // to the final word, so together they cover every word of the verse.
+        if (result.wordCount > 0) {
+            if (!lineStarts.empty()) {
+                lineStarts.front().word = 0;
+                for (size_t k = 0; k < lineStarts.size(); k++) {
+                    PoetryLine line;
+                    line.start = lineStarts[k].word;
+                    line.end = (k + 1 < lineStarts.size()) ? lineStarts[k + 1].word - 1 : result.wordCount - 1;
+                    line.level = lineStarts[k].level;
+                    if (line.end < line.start) continue;
+                    result.block.lines.push_back(line);
+                    // An <l type="selah"> line is nothing but the direction.
+                    if (lineStarts[k].selah) {
+                        FormatSpan span;
+                        span.type = "musical_direction";
+                        span.start = line.start;
+                        span.end = line.end;
+                        result.spans.push_back(span);
+                    }
+                }
+            } else if (lineGroupSeen) {
+                PoetryLine line;
+                line.start = 0;
+                line.end = result.wordCount - 1;
+                line.level = 1;
+                result.block.lines.push_back(line);
+            }
+        }
+
         // A paragraph marker sitting after the last word belongs to the next
         // verse, not this one. Only the source document makes this visible, so
         // the converter carries it forward rather than losing it.
@@ -1233,19 +1305,21 @@ namespace SwordCommon {
                 json << "\"paragraph_start\":true";
                 first = false;
             }
-            if (result.block.poetryLevel > 0) {
+            if (!result.block.lines.empty()) {
                 if (!first) json << ",";
-                json << "\"poetry_level\":" << result.block.poetryLevel;
+                json << "\"lines\":[";
+                for (size_t i = 0; i < result.block.lines.size(); i++) {
+                    const PoetryLine& l = result.block.lines[i];
+                    if (i > 0) json << ",";
+                    json << "{\"start\":" << l.start << ",\"end\":" << l.end
+                         << ",\"level\":" << l.level << "}";
+                }
+                json << "]";
                 first = false;
             }
             if (!result.block.heading.empty()) {
                 if (!first) json << ",";
                 json << "\"heading\":\"" << jsonEscape(result.block.heading) << "\"";
-                first = false;
-            }
-            if (result.block.selah) {
-                if (!first) json << ",";
-                json << "\"selah\":true";
                 first = false;
             }
             json << "}";

@@ -166,10 +166,24 @@ static SwordCommon::OsisVerseResult mergeVerseResults(const SwordCommon::OsisVer
     // Block-level: the first fragment opens the block; poetry takes the deeper
     // level; the first non-empty heading wins.
     merged.block.paragraphStart = first.block.paragraphStart;
-    merged.block.poetryLevel = (first.block.poetryLevel > second.block.poetryLevel)
-        ? first.block.poetryLevel : second.block.poetryLevel;
     merged.block.heading = first.block.heading.empty() ? second.block.heading : first.block.heading;
-    merged.block.selah = first.block.selah || second.block.selah;
+
+    // Poetry lines: concatenated, the second fragment's shifted past the first.
+    // When only one fragment is poetry its lines are stretched over the other
+    // fragment's words so the lines still cover the whole merged verse.
+    merged.block.lines = first.block.lines;
+    for (SwordCommon::PoetryLine line : second.block.lines) {
+        line.start += first.wordCount;
+        line.end += first.wordCount;
+        merged.block.lines.push_back(line);
+    }
+    if (!merged.block.lines.empty()) {
+        merged.block.lines.front().start = 0;
+        merged.block.lines.back().end = merged.wordCount - 1;
+        for (size_t k = 0; k + 1 < merged.block.lines.size(); k++) {
+            merged.block.lines[k].end = merged.block.lines[k + 1].start - 1;
+        }
+    }
 
     // Only a marker after the LAST word still points at the next verse.
     merged.trailingParagraphMarker = second.trailingParagraphMarker;

@@ -9,7 +9,7 @@ LIBRARY = libswordcommon.a
 SOURCE = sword_common.cpp
 OBJECT = sword_common.o
 
-.PHONY: all clean
+.PHONY: all clean test
 
 all: $(LIBRARY)
 
@@ -20,4 +20,10 @@ $(LIBRARY): $(OBJECT)
 	$(AR) $(ARFLAGS) $(LIBRARY) $(OBJECT)
 
 clean:
-	rm -f $(OBJECT) $(LIBRARY)
+	rm -f $(OBJECT) $(LIBRARY) test_parse_osis
+
+test_parse_osis: test_parse_osis.cpp $(LIBRARY)
+	$(CXX) $(CXXFLAGS) -o $@ test_parse_osis.cpp $(LIBRARY) -lsword -lsqlite3 -lzip
+
+test: test_parse_osis
+	./test_parse_osis

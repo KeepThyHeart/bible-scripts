@@ -262,8 +262,8 @@ KEY_VERSES = [
 ]
 
 SPAN_TYPES = {'divine_name', 'supplied', 'words_of_christ', 'emphasis', 'quotation',
-              'transliteration'}
-BLOCK_KEYS = {'paragraph_start', 'poetry_level', 'heading', 'heading_kind', 'selah'}
+              'transliteration', 'musical_direction'}
+BLOCK_KEYS = {'paragraph_start', 'lines', 'heading', 'heading_kind'}
 
 # ---------------------------------------------------------------------------
 # Text hygiene: patterns that must not appear in clean canonical text.
@@ -968,8 +968,20 @@ def verify_bible(zip_path, db_path, log_path=None, reference_db=None, catalog_ro
                 fmt_errors.append(f'{ref_name(verse_id)}: unknown block key {k}')
         if block.get('heading'):
             headings.append((verse_id, block['heading']))
-        if 'poetry_level' in block and block['poetry_level'] not in (1, 2, 3):
-            fmt_errors.append(f'{ref_name(verse_id)}: poetry_level {block["poetry_level"]}')
+        if 'lines' in block:
+            # Ordered, non-overlapping, covering every word, level 1..3.
+            lines = block['lines']
+            expect = 0
+            for ln in lines if isinstance(lines, list) else []:
+                lv = ln.get('level')
+                if lv not in (1, 2, 3) or ln.get('start') != expect or not isinstance(ln.get('end'), int) \
+                        or ln['end'] < ln['start']:
+                    fmt_errors.append(f'{ref_name(verse_id)}: bad poetry line {ln} (expected start {expect})')
+                    break
+                expect = ln['end'] + 1
+            else:
+                if not isinstance(lines, list) or not lines or expect != tokens:
+                    fmt_errors.append(f'{ref_name(verse_id)}: poetry lines cover {expect} of {tokens} words')
         if doc.get('source_verses'):
             source_verse_rows += 1
         for s in doc.get('spans') or []:

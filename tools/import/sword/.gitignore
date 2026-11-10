@@ -26,3 +26,4 @@ bible_*.db
 # sword-probe (verification) binary and Python caches
 probe/sword-probe
 __pycache__/
+common/test_parse_osis
