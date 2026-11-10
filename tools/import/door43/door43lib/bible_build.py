@@ -13,6 +13,7 @@ import sqlite3
 
 from . import books, compare as compare_mod, identity, schema, usfm_aligned, versification as vers_mod
 from .fetch import release_url
+from .versification import UnmappedVerse
 
 __all__ = ["build", "Frag", "merge_frags", "convert_morphology", "BuildError"]
 
@@ -172,7 +173,13 @@ def _assemble(archive, vers, report):
                     report["bridged_verses"].append("%s %d:%d-%d" % (code, ch, v, vr.verse_end))
                 frag = Frag.from_verse(vr)
                 own = {"chapter": ch, "verse": v, "start": 0, "end": frag.word_count - 1}
-                c2, v2 = vers.map_verse(bnum, ch, v)
+                try:
+                    c2, v2 = vers.map_verse(bnum, ch, v)
+                except UnmappedVerse:
+                    if not report.get("allow_unmapped"):
+                        raise
+                    report.setdefault("dropped_unmapped", []).append("%s %d:%d" % (code, ch, v))
+                    continue
                 hid = books.verse_id(bnum, c2, v2)
                 m = vers.merge_info(bnum, ch, v)
                 if m is not None:
@@ -328,6 +335,7 @@ def build(archive, source_row, out_dir, ref_db=None, versification=None):
     report = {"source": source_row.get("id") or source_row.get("repo"), "books": [], "skipped_books": [],
               "footnotes_dropped": 0, "warnings": [], "empty_verses": [], "bridged_verses": [],
               "merged_verses": []}
+    report["allow_unmapped"] = bool(source_row.get("allow_unmapped"))
     verses = _assemble(archive, vers, report)
     if not verses:
         raise BuildError("no verses parsed from %s" % report["source"])
@@ -345,7 +353,7 @@ def build(archive, source_row, out_dir, ref_db=None, versification=None):
             report["identity_reason"] = "no reference module given; using the -ALN suffix"
         elif ref_db and abbr0220:
             cmp = compare_mod.compare(tmp, ref_db)
-            report["compare"] = {k: cmp[k] for k in ("pass", "verse_sets_identical", "text_equal_pct",
+            report["compare"] = {k: cmp[k] for k in ("pass", "verse_sets_identical", "text_equal_pct", "text_equal_nospace_pct",
                                                       "alignment_coverage_pct", "totals", "books_only_ref")}
             reuse = bool(cmp["pass"]) and ref is not None
             report["identity_reason"] = ("comparison with %s passed" % ref["abbreviation"] if reuse else

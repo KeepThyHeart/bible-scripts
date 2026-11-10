@@ -128,7 +128,7 @@ def parse_rc(s):
 
 def parse_relative(s, book, chapter):
     """tN relative link: ``./05.md``, ``../01/05.md``, ``../../1jn/01/05.md`` (also ``intro.md``)."""
-    t = re.sub(r'\.md$', '', s.strip(), flags=re.I).rstrip('/')
+    t = re.sub(r'\.?md$', '', re.sub(r'\s+', '', s), flags=re.I).rstrip('/')
     segs = [p for p in t.split('/') if p not in ('', '.', '..')]
     if not segs or len(segs) > 3:
         raise RefError(f'bad relative link: {s!r}')

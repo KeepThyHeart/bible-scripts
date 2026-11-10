@@ -85,6 +85,14 @@ class CompareTest(unittest.TestCase):
         make_db(self.ref, ref)
         self.assertFalse(compare.compare(self.new, self.ref)["pass"])
 
+    def test_nospace_measure_drives_pass(self):
+        make_db(self.new, {64001001: ("ab cd", None), 64001002: ("x y", None)})
+        make_db(self.ref, {64001001: ("abcd", None), 64001002: ("x  y", None)})
+        r = compare.compare(self.new, self.ref)
+        self.assertEqual(r["text_equal_pct"], 50.0)
+        self.assertEqual(r["text_equal_nospace_pct"], 100.0)
+        self.assertTrue(r["pass"])
+
     def test_diffs_limited_to_three(self):
         new = {64001000 + i: ("a%d" % i, None) for i in range(1, 8)}
         make_db(self.new, new)

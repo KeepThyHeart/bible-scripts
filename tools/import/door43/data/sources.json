@@ -9,7 +9,7 @@
    "tag": "v37",
    "lang": "es",
    "door43_lang": "es-419",
-   "sha256": null
+   "sha256": "b74e7171f665aa95b4fcec6f64619d70027b076840a9223eb0d77e1fd5851874"
   },
   {
    "id": "tn-es",
@@ -19,7 +19,7 @@
    "tag": "v66",
    "lang": "es",
    "door43_lang": "es-419",
-   "sha256": null,
+   "sha256": "3ae5256ae0b3de7f33621b8eeb023bcf4af89541a54aa6f154b940b9fb873a8c",
    "note": "Rut Jon Tit 3Jn only"
   },
   {
@@ -30,7 +30,7 @@
    "tag": "v0.0.1",
    "lang": "fr",
    "door43_lang": "fr",
-   "sha256": null,
+   "sha256": "0bb95f33bde829c2363a30e384ca4c4822dced210fb24d278e65e1d4cf7d8e3f",
    "note": "1006 articles; uW fr_tw v7.3 has 981"
   },
   {
@@ -41,7 +41,7 @@
    "tag": "v2.0",
    "lang": "fr",
    "door43_lang": "fr",
-   "sha256": null
+   "sha256": "25074f30cf94a8d31762d9f6ad5ed585484292049747907a1839bf843c89f558"
   },
   {
    "id": "tw-hi",
@@ -51,7 +51,7 @@
    "tag": "v8",
    "lang": "hi",
    "door43_lang": "hi",
-   "sha256": null
+   "sha256": "7426d97bbef24a37ef79f9325e580221361e7866bd15d09db7d4ec9a45fa9bba"
   },
   {
    "id": "tn-hi",
@@ -61,7 +61,7 @@
    "tag": "v9",
    "lang": "hi",
    "door43_lang": "hi",
-   "sha256": null
+   "sha256": "85938a53f021af83d9cfcc94b494e3a85aafa575bfa87f28a91788ea7d976e1a"
   },
   {
    "id": "tq-hi",
@@ -71,7 +71,7 @@
    "tag": "v8",
    "lang": "hi",
    "door43_lang": "hi",
-   "sha256": null
+   "sha256": "75d8fc65434bdb91be33985df2e3c9e9a19b136485267a41338c04027241bb6d"
   },
   {
    "id": "obs-hi",
@@ -81,7 +81,7 @@
    "tag": "v8.3",
    "lang": "hi",
    "door43_lang": "hi",
-   "sha256": null
+   "sha256": "9049ec075935c827d5f04e374d4dd1f7d43f9202f69a7ef917b1a7186c6ddc6b"
   },
   {
    "id": "tw-bn",
@@ -91,7 +91,7 @@
    "tag": "v4",
    "lang": "bn",
    "door43_lang": "bn",
-   "sha256": null
+   "sha256": "540024c9c6cb1cda99fc7482fe2dc6c7b0d63aeec1026a2f7f43d1725f3594fa"
   },
   {
    "id": "tn-bn",
@@ -101,7 +101,7 @@
    "tag": "v6",
    "lang": "bn",
    "door43_lang": "bn",
-   "sha256": null
+   "sha256": "60b1effe07efc9de4f8d731c1025d7487a80493ac73b3d04ce06d37d017d3ac0"
   },
   {
    "id": "tq-bn",
@@ -111,7 +111,7 @@
    "tag": "v2",
    "lang": "bn",
    "door43_lang": "bn",
-   "sha256": null
+   "sha256": "719f21ff5520df615ceda746820c8aa9959b74f748447eaf404d4327fca8ed68"
   },
   {
    "id": "obs-bn",
@@ -121,7 +121,7 @@
    "tag": "v4.4",
    "lang": "bn",
    "door43_lang": "bn",
-   "sha256": null
+   "sha256": "a082c83c8609e184b65a2992935e11d2796d272bc731590f1c29649fd5537c76"
   },
   {
    "id": "tw-ar",
@@ -131,7 +131,7 @@
    "tag": "v5",
    "lang": "ar",
    "door43_lang": "ar",
-   "sha256": null
+   "sha256": "58dca3cf21183cb312a552b6a8b298a6f198e165c3ac3e877c66d82adf88a1ab"
   },
   {
    "id": "tn-ar",
@@ -141,7 +141,7 @@
    "tag": "v6.1",
    "lang": "ar",
    "door43_lang": "ar",
-   "sha256": null
+   "sha256": "867f8244420b50ee0c35e322c5281bc46225c39ddd0b3bed4ff3e736552f7fca"
   },
   {
    "id": "tq-ar",
@@ -151,7 +151,7 @@
    "tag": "v3.1",
    "lang": "ar",
    "door43_lang": "ar",
-   "sha256": null
+   "sha256": "29d786e5bbebd8671bef2e633a79c733c44d9f5f18a0207199e7d5be5e0a7014"
   },
   {
    "id": "obs-ar",
@@ -161,7 +161,7 @@
    "tag": "v1",
    "lang": "ar",
    "door43_lang": "ar",
-   "sha256": null
+   "sha256": "6292884bc572a3760319dc24185a6b96efd5f1d23fbe6944c9c3925b3c985b4a"
   },
   {
    "id": "tw-pt",
@@ -171,7 +171,7 @@
    "tag": "v6.4",
    "lang": "pt",
    "door43_lang": "pt-br",
-   "sha256": null
+   "sha256": "1dbb3c298d2f23eccce818a3d05bc35d7328ea6df07967bc59107356264ed6a0"
   },
   {
    "id": "tn-pt",
@@ -181,7 +181,7 @@
    "tag": "v7.1",
    "lang": "pt",
    "door43_lang": "pt-br",
-   "sha256": null,
+   "sha256": "bb4215f8263d2257ddf91b46b066bd65eb5935b74998096acfca7b4b34d4fd0d",
    "legacy_markdown": true
   },
   {
@@ -192,7 +192,7 @@
    "tag": "v9.2",
    "lang": "pt",
    "door43_lang": "pt-br",
-   "sha256": null,
+   "sha256": "86714ce03969449b524c36836ad0eee0a84ba187e090e6dc86be0a5b01af060b",
    "legacy_markdown": true
   },
   {
@@ -203,7 +203,7 @@
    "tag": "v3.2.3",
    "lang": "pt",
    "door43_lang": "pt-br",
-   "sha256": null
+   "sha256": "849c5f3892735a18beb887ff24c1feb42fb31b3e2581b7ad4236732bb4e9e1f9"
   },
   {
    "id": "bible-ar-avd",
@@ -213,8 +213,9 @@
    "tag": "v6.9",
    "lang": "ar",
    "door43_lang": "ar",
-   "sha256": null,
-   "abbr_0220": "AVD"
+   "sha256": "17d9a3a0f921b649bfb9faae802bbd5f62c9f1b124f266068f129055fb95d944",
+   "abbr_0220": "AVD",
+   "ref_db_file": "bible_arbVDeb.db"
   },
   {
    "id": "bible-ar-nav",
@@ -224,8 +225,9 @@
    "tag": "v2",
    "lang": "ar",
    "door43_lang": "ar",
-   "sha256": null,
-   "abbr_0220": "NAV"
+   "sha256": "b5150cec911cec21210d65fc7d1be1a5f174e563ff73cce438d7812158c0f8af",
+   "abbr_0220": "NAV",
+   "ref_db_file": "bible_arbnav2012eb.db"
   },
   {
    "id": "bible-hi-irv",
@@ -235,8 +237,9 @@
    "tag": "v12",
    "lang": "hi",
    "door43_lang": "hi",
-   "sha256": null,
-   "abbr_0220": "IRV-HI"
+   "sha256": "7668204fa80ca72323b3be8c5ea13b24cfba0571a35ae348a4a4ddc83db7c931",
+   "abbr_0220": "IRV-HI",
+   "ref_db_file": "bible_hin2017eb.db"
   },
   {
    "id": "bible-bn-irv",
@@ -246,8 +249,9 @@
    "tag": "v5",
    "lang": "bn",
    "door43_lang": "bn",
-   "sha256": null,
-   "abbr_0220": "IRV-BN"
+   "sha256": "98ab617112e05416f17e7a7a269fa83160d25d6923a205c5fd873e6df5eca4ac",
+   "abbr_0220": "IRV-BN",
+   "ref_db_file": "bible_benirv2019eb.db"
   },
   {
    "id": "bible-fr-lsg",
@@ -257,9 +261,11 @@
    "tag": "v0.0.2",
    "lang": "fr",
    "door43_lang": "fr",
-   "sha256": null,
+   "sha256": "6e63f37a85742a3203985446366d23c859606180b3e184d01691cd2ad52789e3",
    "abbr_0220": null,
-   "note": "NT only"
+   "note": "NT only",
+   "allow_unmapped": true,
+   "allow_unmapped_reason": "source has misplaced verses (Mark 9:51, Mark 10:53 do not exist); dropped and reported"
   }
  ]
 }

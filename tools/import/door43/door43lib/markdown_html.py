@@ -40,9 +40,10 @@ _RC = re.compile(r"rc:\s?//[^\s)\]]*")
 _CODE = re.compile(r"(`+)(.+?)\1")
 
 
-def render_inline(text):
+def render_inline(text, _held=None):
     """Inline Markdown -> HTML (no block structure)."""
-    held = []
+    top = _held is None
+    held = [] if top else _held
 
     def hold(html):
         held.append(html)
@@ -59,7 +60,7 @@ def render_inline(text):
         href = re.sub(r'\s+"[^"]*"$', "", href)
         if href.startswith("<") and href.endswith(">"):
             href = href[1:-1]
-        label = render_inline(m.group(2))
+        label = render_inline(m.group(2), held)
         return hold('<a href="%s">%s</a>' % (_esc_href(href), label))
 
     text = _LINK.sub(link, text)
@@ -73,6 +74,8 @@ def render_inline(text):
     text = re.sub(r"(?<!\w)__(?=\S)(.+?)(?<=\S)__(?!\w)", r"<strong>\1</strong>", text)
     text = re.sub(r"\*(?=[^\s*])(.+?)(?<=[^\s*])\*", r"<em>\1</em>", text)
     text = re.sub(r"(?<!\w)_(?=[^\s_])(.+?)(?<=[^\s_])_(?!\w)", r"<em>\1</em>", text)
+    if not top:
+        return text  # the outermost call restores the shared placeholders
     # restore placeholders (they may nest: a link label holds other placeholders)
     for _ in range(4):
         new = _PH_RE.sub(lambda m: held[int(m.group(1))], text)

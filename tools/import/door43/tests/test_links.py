@@ -152,3 +152,11 @@ class OtherLinksTest(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class RelativeRepairTest(unittest.TestCase):
+    def test_space_book_first_and_missing_dot(self):
+        from door43lib import links
+        for h in ('.. /luk/23/49.md', 'luk/23/49.md', '../../luk/23/49md'):
+            r = links.resolve_links('<a href="%s">x</a>' % h, links.Registry(), book=43, chapter=1)
+            self.assertIn('scripture-link', r.html, h)

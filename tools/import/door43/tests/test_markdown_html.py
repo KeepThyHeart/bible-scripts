@@ -68,3 +68,11 @@ class MarkdownTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class NestedPlaceholderTest(unittest.TestCase):
+    def test_link_label_with_escape_and_code(self):
+        from door43lib import markdown_html
+        out = markdown_html.render_inline(r"see [a \* `b` c](http://x.org/y) now \*done")
+        self.assertIn('<a href="http://x.org/y">a * b c</a>', out)
+        self.assertIn("now *done", out)

@@ -178,7 +178,10 @@ def _classify(href, reg, book, chapter):
             return _obs_target(segs[2:], reg)
         raise _Skip('other', 'unknown rc resource %r' % res)
     if h.startswith('.'):
-        return _relative_target(h, reg, book, chapter)
+        return _relative_target(re.sub(r'\s+', '', h), reg, book, chapter)
+    first = h.split('/', 1)[0]
+    if '/' in h and books.try_book_number(first) is not None:
+        return _relative_target(re.sub(r'\s+', '', h), reg, book, chapter)  # "exod/26/31.md"
     raise _Skip('other', 'unsupported href %r' % h[:60])
 
 
@@ -215,7 +218,7 @@ def _obs_target(segs, reg):
 
 
 def _relative_target(h, reg, book, chapter):
-    segs = [p for p in re.sub(r'\.md$', '', h, flags=re.I).split('/') if p not in ('', '.', '..')]
+    segs = [p for p in re.sub(r'\.?md$', '', h, flags=re.I).split('/') if p not in ('', '.', '..')]
     if not segs:
         raise _Skip('other', 'empty relative link')
     first = segs[0].lower()

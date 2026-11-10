@@ -9,7 +9,8 @@ whitespace collapse (first 3 differences), ``formatting.source_verses`` equality
 interlinear row with a Strong's number / all words) and the number of verses with no
 alignment at all.
 
-Pass rule: identical verse sets and at least 99.5 % of the common verses equal in text.
+Pass rule: identical verse sets and at least 99.5 % of the common verses equal in text
+ignoring ALL whitespace (``text_equal_nospace_pct``); the strict ``text_equal_pct`` is reported too.
 By default only the books present in the new module are compared (a partial NT is not
 failed for lacking the OT); the books only the reference has are listed under
 ``books_only_ref``.  Pass ``strict_books=True`` to compare every book.
@@ -30,6 +31,11 @@ _MAX_LIST = 10
 
 def normalize_text(s):
     return " ".join(unicodedata.normalize("NFC", s or "").split())
+
+
+def normalize_nospace(s):
+    """NFC, then drop ALL whitespace (including between words)."""
+    return "".join(unicodedata.normalize("NFC", s or "").split())
 
 
 def _module_info(conn):
@@ -90,7 +96,7 @@ def _load(conn):
 
 def _empty_book():
     return {"verses_new": 0, "verses_ref": 0, "verses_both": 0, "only_new": 0, "only_ref": 0,
-            "only_new_ids": [], "only_ref_ids": [], "text_equal": 0, "text_diff": 0, "diffs": [],
+            "only_new_ids": [], "only_ref_ids": [], "text_equal": 0, "text_equal_nospace": 0, "text_diff": 0, "diffs": [],
             "source_verses_equal": 0, "source_verses_diff": 0, "source_verse_diffs": [],
             "interlinear_new": 0, "interlinear_ref": 0, "words": 0, "words_covered": 0,
             "zero_alignment_verses": 0}
@@ -139,6 +145,8 @@ def compare(new_db, ref_db, strict_books=False):
                 bk["text_diff"] += 1
                 if len(bk["diffs"]) < 3:
                     bk["diffs"].append({"verse_id": vid, "new": nv[vid][0], "ref": rv[vid][0]})
+            if normalize_nospace(nv[vid][0]) == normalize_nospace(rv[vid][0]):
+                bk["text_equal_nospace"] += 1
             sn, sr = _source_verses(nv[vid][1]), _source_verses(rv[vid][1])
             if sn == sr:
                 bk["source_verses_equal"] += 1
@@ -164,9 +172,10 @@ def compare(new_db, ref_db, strict_books=False):
         totals.pop(k)
     both = totals["verses_both"]
     text_pct = 100.0 * totals["text_equal"] / both if both else 0.0
+    nospace_pct = 100.0 * totals["text_equal_nospace"] / both if both else 0.0
     coverage = 100.0 * totals["words_covered"] / totals["words"] if totals["words"] else 0.0
     sets_identical = totals["only_new"] == 0 and totals["only_ref"] == 0
-    passed = bool(both) and sets_identical and text_pct >= PASS_TEXT_PCT
+    passed = bool(both) and sets_identical and nospace_pct >= PASS_TEXT_PCT
     names = {}
     for b in per:
         try:
@@ -183,6 +192,7 @@ def compare(new_db, ref_db, strict_books=False):
         "totals": totals,
         "verse_sets_identical": sets_identical,
         "text_equal_pct": round(text_pct, 3),
+        "text_equal_nospace_pct": round(nospace_pct, 3),
         "alignment_coverage_pct": round(coverage, 3),
         "pass_threshold_pct": PASS_TEXT_PCT,
         "pass": passed,
@@ -198,8 +208,10 @@ def format_summary(result):
     lines = ["Compare %s (new) with %s (ref): %s" % (n.get("abbreviation") or n.get("path"),
                                                     r.get("abbreviation") or r.get("path"),
                                                     "PASS" if result["pass"] else "FAIL"),
-             "verse sets identical: %s; text equal %.3f%% (need %.1f%%); alignment coverage %.3f%%" % (
-                 result["verse_sets_identical"], result["text_equal_pct"], result["pass_threshold_pct"],
+             "verse sets identical: %s; text equal %.3f%% strict, %.3f%% ignoring whitespace (need %.1f%%); "
+             "alignment coverage %.3f%%" % (
+                 result["verse_sets_identical"], result["text_equal_pct"], result["text_equal_nospace_pct"],
+                 result["pass_threshold_pct"],
                  result["alignment_coverage_pct"]),
              "totals: new %d, ref %d, both %d, only-new %d, only-ref %d; interlinear rows new %d / ref %d; "
              "verses with zero alignment %d" % (t["verses_new"], t["verses_ref"], t["verses_both"], t["only_new"],

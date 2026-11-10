@@ -21,7 +21,7 @@ _ALIASES = {
     'SOS': 'SNG', 'SON': 'SNG', 'CAN': 'SNG', 'PHI': 'PHP', 'PHL': 'PHM', 'JOH': 'JHN', 'MRC': 'MRK',
     'MAR': 'MRK', 'EZE': 'EZK', 'JUDE': 'JUD', 'JUG': 'JDG', 'PS': 'PSA', 'DEUT': 'DEU',
     'DT': 'DEU', 'JL': 'JOL', 'OB': 'OBA', 'ZEPH': 'ZEP', 'ZECH': 'ZEC', 'NAH': 'NAM', 'AM': 'AMO',
-    'JNH': 'JON', 'MK': 'MRK', 'LK': 'LUK', 'JN': 'JHN', 'ACTS': 'ACT', 'ROMANS': 'ROM',
+    'JNH': 'JON', 'MK': 'MRK', 'LK': 'LUK', 'JN': 'JHN', 'ACTS': 'ACT', 'ACTO': 'ACT', 'ROMANS': 'ROM',
 }
 
 _NUMBER = {c: i + 1 for i, c in enumerate(USFM_CODES)}
