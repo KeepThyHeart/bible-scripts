@@ -1,0 +1,15 @@
+{
+  "format": "kth-pron-index/1",
+  "files": [
+    {
+      "path": "en/KJV.json",
+      "bytes": 133505,
+      "sha256": "c9577c93a7306b2e0bf177fe6ac28d30732b7f5eb647e434fe2b17f3eb75162b"
+    },
+    {
+      "path": "en-us/lexicon.json",
+      "bytes": 72290,
+      "sha256": "241362332c208b817f6c2b39e6a05871027176affe1b3c3ea3b335fb9933e358"
+    }
+  ]
+}

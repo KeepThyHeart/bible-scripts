@@ -23,6 +23,9 @@ scripts/            Node scripts, grouped by function
   lib/              shared code: module-identity.js, paths.js, schema.js
                     (loads the Bible repo's SQL schemas)
   data/             kjv-versification.json (used by the validator)
+  pronunciation/    check.js: validates pronunciation/ and keeps its index.json current
+pronunciation/      IPA pronunciation overlay for the app's speech engines (per locale,
+                    language and translation); see pronunciation/README.md
 tools/
   import/sword/     C++ converters from SWORD modules to SQLite (bible, commentary,
                     dictionary, book, devotional, common), plus versification maps
@@ -39,6 +42,7 @@ docs/               notes on the SWORD module format
 ```bash
 npm install
 npm test
+node scripts/pronunciation/check.js
 node scripts/query/db-cli.js --help
 node scripts/modules/validate-module.js --all
 ```
