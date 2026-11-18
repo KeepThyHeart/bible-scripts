@@ -16,7 +16,7 @@ Lookup for a word: locale override for the translation, then its meaning (from t
 - **Occurrences:** `"GEN.1.22": {"hash": "…", "words": {"2": ["blessed", "verb"]}}`. The word index counts `\p{L}+('\p{L}+)*` words of the verse as the app speaks it (`TextPreparer.verse()`), and the hash is FNV-1a 64 of that text. If the module's text changes, the app skips the verse's entries (and `audio-build` reports them) instead of placing them on the wrong word; regenerate them from a new dump.
 - **IPA:** espeak-ng style, the symbols and stress placement in `CONVENTIONS.md`.
 
-Current data: `en-us` (American English, common American Protestant reading-aloud tradition): 2,126 words and 45 homographs with their meanings; `en/KJV.json`: 1,781 occurrences in 1,652 verses.
+Current data: `en-us` (American English, common American Protestant reading-aloud tradition): 2,135 words and 45 homographs with their meanings; `en/KJV.json`: 1,781 occurrences in 1,652 verses.
 
 ## Checking and publishing
 
