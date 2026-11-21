@@ -23,7 +23,10 @@ scripts/            Node scripts, grouped by function
   lib/              shared code: module-identity.js, paths.js, schema.js
                     (loads the Bible repo's SQL schemas)
   data/             kjv-versification.json (used by the validator)
+prosody/            rules for softening repeated phrases in recorded audio; see prosody/README.md
 tools/
+  prosody/          Python: Kokoro TTS with control over durations and pitch (audio-build
+                    engine and sample renderer); see tools/prosody/README.md
   import/sword/     C++ converters from SWORD modules to SQLite (bible, commentary,
                     dictionary, book, devotional, common), plus versification maps
                     in data/. Needs Linux and the SWORD library; see bible/README.md.

@@ -1,0 +1,19 @@
+{
+  "format": "kth-prosody-rules/1",
+  "version": 1,
+  "about": "Softening of repeated small-word phrases (\"and thou shalt\") where Kokoro stresses them above the content word that follows. Read by tools/prosody.",
+  "repeated": {
+    "minCount": 3,
+    "minWords": 2,
+    "maxWords": 5,
+    "smallWords": ["and", "the", "of", "to", "in", "unto", "a", "an", "that", "for", "with", "upon", "his", "her", "their", "it", "them", "him", "he", "she", "they", "be", "is", "was", "shall", "thou", "thee", "thy", "ye", "shalt", "wilt", "which", "by", "from", "i", "me", "my"],
+    "prepositions": ["of", "in", "on", "with", "to", "at", "for", "from", "into", "unto", "by", "upon"]
+  },
+  "soften": {
+    "marginHz": 20,
+    "durationScale": 0.6,
+    "minFramesToShorten": 6,
+    "energyDrop": 0.3,
+    "liftNextHz": 10
+  }
+}
