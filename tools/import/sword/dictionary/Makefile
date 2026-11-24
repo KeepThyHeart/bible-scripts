@@ -2,7 +2,7 @@
 
 CXX = g++
 CXXFLAGS = -std=c++17 -Wall -Wextra -O3 -I/usr/include/sword -I../common
-LDFLAGS = -L../common -lswordcommon -lsword -lsqlite3 -lzip
+LDFLAGS = -L../common -lswordcommon -lsword -lsqlite3 -lzip -lz -l:libzstd.so.1
 
 TARGET = sword2dictionary
 SOURCE = sword2dictionary.cpp
@@ -40,4 +40,4 @@ inspect:
 
 install-deps:
 	sudo apt-get update
-	sudo apt-get install -y build-essential libsword-dev libsqlite3-dev libzip-dev
+	sudo apt-get install -y build-essential libsword-dev libsqlite3-dev libzip-dev zlib1g-dev

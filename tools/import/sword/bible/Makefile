@@ -11,7 +11,7 @@
 
 CXX = g++
 CXXFLAGS = -std=c++17 -Wall -Wextra -O3 -I/usr/include/sword -I../common
-LDFLAGS = -L../common -lswordcommon -lsword -lsqlite3 -lzip
+LDFLAGS = -L../common -lswordcommon -lsword -lsqlite3 -lzip -lz -l:libzstd.so.1
 
 TARGET = sword2bible
 SOURCE = sword2bible.cpp
@@ -42,7 +42,8 @@ install-deps:
 		build-essential \
 		libsword-dev \
 		libsqlite3-dev \
-		libzip-dev
+		libzip-dev \
+		zlib1g-dev
 	@echo "Dependencies installed"
 
 # Test with KJV.zip
