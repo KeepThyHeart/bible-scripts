@@ -163,6 +163,12 @@ The SWORD converters repair known defects in the CrossWire sources. Build a modu
 - `sword2commentary` always skips Luther's "No Commentary on these verses is yet included" placeholder page.
 - `sword2bible` writes one `interlinear_word` row per Strong's number of a `<w>` (content word first, article
   G3588 / object marker H853 last); it also keeps `<transChange>` boundaries as word breaks ("madethe" in ASV, RWebster).
+- `sword2commentary --clean-html --strip-trailing-byte` (Gill, task 0225; see `commentary/convert-gill.sh`): Gill's
+  ThML renders as `<p />` soup, its scripture references must survive as readable text (the app links them), and
+  its zCom index overstates every entry by one character (junk at the end). The published Gill lost the reference
+  text (800 `:-` stub paragraphs, 4 whole-entry stubs) and gained chapter-navigation text; the cleaning step that
+  built it was not kept, so Gill must be built with these flags. `verify` (`swordcheck.py`, `commentary_checks.py`)
+  flags stub / whole / glued / junk_end entries in every commentary.
 - `sword2dictionary` drops the duplicated Easton heading, the legacy-font `<orth>` token in Strong's Greek, and
   transcodes Windows-1252 bytes in entry keys (2BabDict, AmTract).
 - All converters map U+07F4 in `.conf` text (Nave, ASV, CPDV) to U+2019.
