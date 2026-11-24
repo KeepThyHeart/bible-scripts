@@ -10,10 +10,9 @@
  * truth. bible-scripts cannot import that code (JS in a different repo,
  * scope: this task must not touch the `bible` repo — see task 0035), so this
  * file mirrors the spec's own formula instead. Keep it in step with §2.7 if
- * the design changes; CONTENT_MAP below covers only the five converter types
- * this repo builds (bible, commentary, dictionary, book, devotional) — not
- * topical_index/cross_reference/tag_graph, which this task doesn't convert
- * (0035 spec, "Out of scope").
+ * the design changes; CONTENT_MAP below covers the five converter types this repo
+ * builds (bible, commentary, dictionary, book, devotional) plus topical_index
+ * (the Nave builder) — not cross_reference/tag_graph.
  *
  * digest = SHA-256 over, for each ContentShape in CONTENT_MAP[type] (declared
  * order), for each row ordered by its rowid column ascending:
@@ -47,6 +46,9 @@ const CONTENT_MAP = {
   }],
   book: [{ table: 'book_section', rowid: 'section_id', prose: ['content'], indexed: ['title', 'content'] }],
   devotional: [{ table: 'devotional_entry', rowid: 'entry_id', prose: ['content'], indexed: ['title', 'content'] }],
+  // Mirrors CONTENT_MAP.topical_index in the Bible repo (ModuleFormat.ts): the topic table's
+  // name + content; descriptions, hierarchy and verse links are not part of the digest.
+  topical_index: [{ table: 'topic', rowid: 'topic_id', prose: [], indexed: ['name', 'content'] }],
 };
 
 const TABLE_SEPARATOR = Buffer.from([0x1e]);

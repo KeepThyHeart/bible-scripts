@@ -161,6 +161,7 @@ namespace SwordCommon {
         std::string allStrongs;      // every Strong's number on the element, space separated
         std::string morphology;      // scheme prefixes stripped ("robinson:N-NSM" -> "N-NSM")
         std::string originalWord;    // lemma.TR:/lemma: value when present
+        std::vector<std::string> originalWords;  // every lemma.TR:/lemma: value, in attribute order
         std::string gloss;           // the clean-text words this element covers
         bool hasGloss = false;       // false for self-closing <w/> (no English equivalent)
     };

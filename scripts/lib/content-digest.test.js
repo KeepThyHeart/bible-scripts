@@ -229,7 +229,7 @@ async function main() {
     const file = path.join(TMP, 'g.db');
     await buildCommentaryDb(file);
     const db = openDb(file);
-    await assert.rejects(() => computeContentSha256(db, 'topical_index'));
+    await assert.rejects(() => computeContentSha256(db, 'cross_reference'));
     await close(db);
   });
 

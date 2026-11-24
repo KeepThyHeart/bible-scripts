@@ -28,6 +28,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <algorithm>
+#include <regex>
 
 // SWORD library
 #include <swmgr.h>
@@ -403,6 +404,38 @@ bool insertModuleInfo(const SwordCommon::ModuleIdentity& identity,
 }
 
 /**
+ * Repair artefacts of SWORD's TEI renderer at the start of an entry.
+ *
+ * 1. Easton: the TEI is <entryFree n="Aaron"><title>Aaron</title><p>..., and
+ *    the renderer emits the heading twice ("<b>Aaron</b> Aaron <!P>"), so every
+ *    definition began "Aaron Aaron The eldest son...". The duplicate is dropped
+ *    only when it is followed by the paragraph marker, i.e. it is the title.
+ * 2. Strong's Greek: the source carries <orth type="writing">lovgos</orth>, the
+ *    lemma re-typed in a legacy Greek font. The renderer flattens every <orth>
+ *    to <b>, so it appears as a third bold token after number and lemma
+ *    ("3056 λόγος lovgos logos {log'-os}"). Drop that token.
+ */
+static std::string repairRenderedEntryStart(const std::string& text) {
+    if (text.compare(0, 3, "<b>") != 0) return text;
+
+    static const std::regex greekWriting(
+        "^(<b>[0-9]+[a-z]?</b> <b>[^<]*</b><br /> )<b>[^<]*</b>\\s+(<b>[^<]*</b> <i>\\{|@@@@)");
+    std::string out = std::regex_replace(text, greekWriting, "$1$2",
+                                         std::regex_constants::format_first_only);
+    if (out.size() != text.size()) return out;
+
+    const size_t close = text.find("</b> ");
+    if (close == std::string::npos || close > 200) return text;
+    const std::string head = text.substr(3, close - 3);
+    const size_t afterHead = close + 5;
+    if (head.empty() || head.find('<') != std::string::npos) return text;
+    if (text.compare(afterHead, head.size(), head) != 0) return text;
+    size_t pos = afterHead + head.size();
+    if (text.compare(pos, 5, " <!P>") != 0) return text;
+    return text.substr(0, close + 4) + text.substr(pos);   // keep "<b>head</b>", drop the repeat
+}
+
+/**
  * Convert all dictionary entries
  */
 bool convertEntries(SWModule* module) {
@@ -422,9 +455,13 @@ bool convertEntries(SWModule* module) {
         // renderText() returns SWBuf BY VALUE; binding it to a `const char*`
         // leaves a dangling pointer once the temporary dies. Hold the buffer.
         const sword::SWBuf renderedBuf = module->renderText();
-        const std::string entryKey = keyRaw ? std::string(keyRaw) : std::string();
-        const std::string text =
-            renderedBuf.length() ? std::string(renderedBuf.c_str()) : std::string();
+        // Entry keys come straight from the module's index, not through the OSIS
+        // pipeline; 2BabDict and AmTract carry Windows-1252 apostrophes (0x92)
+        // there ("ABRAHAM\x92S BOSOM"), which is invalid UTF-8 in the database.
+        std::string entryKey = keyRaw ? std::string(keyRaw) : std::string();
+        if (!SwordCommon::isValidUtf8(entryKey)) entryKey = SwordCommon::latin1ToUtf8(entryKey);
+        const std::string text = repairRenderedEntryStart(
+            renderedBuf.length() ? std::string(renderedBuf.c_str()) : std::string());
 
         // Skip empty entries
         if (!SwordCommon::trim(text).empty() && !entryKey.empty()) {

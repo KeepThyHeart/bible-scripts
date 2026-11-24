@@ -554,6 +554,31 @@ namespace SwordCommon {
         }
 
         /**
+         * Every original-language word in a `lemma` attribute, in order. Parallel
+         * to extractStrongs() when the source tags each number with its lemma:
+         * "strong:G3588 strong:G3056 lemma.TR:ο lemma.TR:λογος" -> {"ο","λογος"}.
+         */
+        std::vector<std::string> extractOriginalWords(const std::string& lemmaValue) {
+            std::vector<std::string> words;
+            for (const char* prefix : {"lemma.TR:", "lemma:"}) {
+                const size_t prefixLen = std::strlen(prefix);
+                size_t pos = 0;
+                while ((pos = lemmaValue.find(prefix, pos)) != std::string::npos) {
+                    pos += prefixLen;
+                    size_t end = pos;
+                    while (end < lemmaValue.size()
+                           && !std::isspace(static_cast<unsigned char>(lemmaValue[end]))) {
+                        end++;
+                    }
+                    if (end > pos) words.push_back(lemmaValue.substr(pos, end - pos));
+                    pos = end;
+                }
+                if (!words.empty()) break;
+            }
+            return words;
+        }
+
+        /**
          * Strip scheme prefixes from morphology codes.
          * "robinson:T-NSM robinson:N-NSM" -> "T-NSM N-NSM"
          */
@@ -704,8 +729,27 @@ namespace SwordCommon {
 
     } // anonymous namespace
 
+    namespace {
+        /**
+         * Some OSIS sources (ASV, RWebster) put a <transChange> element directly
+         * against its neighbouring <w> with no whitespace between them:
+         *   ...night: <transChange><w>he</w> <w>made</w></transChange><w>the</w>...
+         * The element boundary is the only word break there, and since
+         * parseOsisVerse() builds words from text, it fused them into "madethe".
+         * Only a boundary that opens or closes a <transChange> around a <w> is
+         * touched, so a genuine mid-word element split cannot be affected.
+         */
+        std::string separateTransChangeWords(const std::string& s) {
+            if (s.find("transChange") == std::string::npos) return s;
+            static const std::regex afterClose("(</transChange>)(<w[ >])");
+            static const std::regex beforeOpen("(</w>)(<transChange[^>]*>)(<w[ >])");
+            std::string out = std::regex_replace(s, afterClose, "$1 $2");
+            return std::regex_replace(out, beforeOpen, "$1 $2$3");
+        }
+    } // anonymous namespace
+
     OsisVerseResult parseOsisVerse(const std::string& osisInput) {
-        const std::string osis = unescapeEscapedOsisMarkup(osisInput);
+        const std::string osis = separateTransChangeWords(unescapeEscapedOsisMarkup(osisInput));
         OsisVerseResult result;
         result.text.reserve(osis.size());
 
@@ -912,6 +956,7 @@ namespace SwordCommon {
                         }
                     }
                     rec.originalWord = extractOriginalWord(lemma);
+                    rec.originalWords = extractOriginalWords(lemma);
                     rec.morphology = stripMorphPrefixes(tagAttr(body, "morph"));
                     rec.startWord = result.wordCount;
 
@@ -1729,7 +1774,14 @@ namespace SwordCommon {
             auto it = config.find(key);
             if (it == config.end()) return std::string();
             // .conf values are not reliably UTF-8; module_info must be.
-            return isValidUtf8(it->second) ? it->second : latin1ToUtf8(it->second);
+            std::string value = isValidUtf8(it->second) ? it->second : latin1ToUtf8(it->second);
+            // Some .conf files (Nave, ASV, CPDV) spell an apostrophe as U+07F4
+            // (N'Ko high tone apostrophe, UTF-8 DF B4), which renders as "Naveߴs".
+            // It is only ever a typographic apostrophe here: use U+2019.
+            for (size_t p = 0; (p = value.find("\xDF\xB4", p)) != std::string::npos; p += 3) {
+                value.replace(p, 2, "\xE2\x80\x99");
+            }
+            return value;
         };
 
         ModuleIdentity id;

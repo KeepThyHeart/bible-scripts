@@ -368,6 +368,28 @@ void test_parseOsisVerse_abp_word_order_numeral_dropped() {
     CHECK(rHtml.text == "[way an evil]");
 }
 
+void test_parseOsisVerse_transChange_boundary_keeps_words_apart() {
+    // ASV/RWebster put <transChange> directly against a neighbouring <w> with no
+    // whitespace; the element boundary is the only word break ("madethe").
+    const std::string osis =
+        "<w>night:</w> <transChange type=\"added\"><w>he</w> <w>made</w></transChange><w>the</w> "
+        "<w>stars</w><transChange type=\"added\"><w>also</w></transChange>";
+    const OsisVerseResult r = parseOsisVerse(osis);
+    CHECK(r.text.find("madethe") == std::string::npos);
+    CHECK(r.text.find("he made the") != std::string::npos);
+}
+
+void test_parseOsisVerse_collects_every_lemma_word() {
+    const std::string osis =
+        "<w lemma=\"strong:G3588 strong:G3056 lemma.TR:\xCE\xBF lemma.TR:\xCE\xBB\xCE\xBF\xCE\xB3\xCE\xBF\xCF\x82\">the Word</w>";
+    const OsisVerseResult r = parseOsisVerse(osis);
+    CHECK(!r.interlinear.empty());
+    if (!r.interlinear.empty()) {
+        CHECK(r.interlinear[0].originalWords.size() == 2);
+        CHECK(r.interlinear[0].allStrongs == "G3588 G3056");
+    }
+}
+
 // ============================================================================
 
 int main() {
@@ -387,6 +409,8 @@ int main() {
     RUN(test_parseOsisVerse_escaped_angle_bracket_dropped);
     RUN(test_parseOsisVerse_backslash_marker_any_case_stripped);
     RUN(test_parseOsisVerse_abp_word_order_numeral_dropped);
+    RUN(test_parseOsisVerse_transChange_boundary_keeps_words_apart);
+    RUN(test_parseOsisVerse_collects_every_lemma_word);
 
     if (g_failures == 0) {
         std::cout << "\nALL SELFTESTS PASSED\n";
