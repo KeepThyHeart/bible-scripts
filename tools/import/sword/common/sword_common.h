@@ -472,6 +472,18 @@ namespace SwordCommon {
                          int sortOrder,
                          const std::string& context = "");
 
+    /**
+     * Normalise libsword's HTML render of a ThML commentary entry into
+     * <p>/<strong>/<em> paragraphs. Scripture references are kept as their
+     * visible text (never dropped with the element), libsword's passagestudy
+     * anchors are removed, and the entry's own leading "29:1" locator is
+     * dropped. Used by sword2commentary --clean-html (task 0225).
+     */
+    std::string cleanCommentaryHtml(const std::string& rendered);
+
+    /** Replace every "&" that does not start an entity ("&c.]", "AT&T") with "&amp;". */
+    void escapeBareAmpersands(std::string& text);
+
 } // namespace SwordCommon
 
 #endif // SWORD_COMMON_H

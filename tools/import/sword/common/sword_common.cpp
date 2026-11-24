@@ -2330,4 +2330,119 @@ namespace SwordCommon {
                fs::exists(std::string(moduleDataPath) + ".bzv");
     }
 
+/**
+ * Normalise libsword's HTML render of a ThML commentary entry.
+ *
+ * libsword emits "<p />" as a paragraph *separator*, <b>/<i> for emphasis,
+ * <a href="passagestudy.jsp?...">ref</a> for scripture references and raw
+ * <font name="hebrew"> wrappers. Output: balanced <p>...</p> paragraphs,
+ * <strong>/<em>, and every reference as its visible text ("2Ch 29:1-3").
+ * Reference text is NEVER dropped with its element (that was the published
+ * Gill's defect, leaving ":-" stubs). Chapter-navigation runs ("2 Chronicles2Ch 27...")
+ * are removed.
+ */
+std::string cleanCommentaryHtml(const std::string& in) {
+    std::string out;
+    out.reserve(in.size() + 64);
+    size_t i = 0;
+    // The ThML source starts each entry with its own "29:1 " locator, which the
+    // app already shows as the verse heading: drop it.
+    while (i < in.size() && isdigit((unsigned char)in[i])) i++;
+    if (i > 0 && i < in.size() && in[i] == ':') {
+        i++;
+        size_t j = i;
+        while (j < in.size() && (isdigit((unsigned char)in[j]) || in[j] == '-')) j++;
+        i = (j > i) ? j : 0;
+    } else {
+        i = 0;
+    }
+    while (i < in.size()) {
+        if (in[i] != '<') { out += in[i++]; continue; }
+        size_t end = in.find('>', i);
+        if (end == std::string::npos) { out += in.substr(i); break; }
+        std::string tag = in.substr(i + 1, end - i - 1);
+        i = end + 1;
+        std::string name;
+        bool closing = false;
+        size_t k = 0;
+        if (k < tag.size() && tag[k] == '/') { closing = true; k++; }
+        while (k < tag.size() && (isalnum((unsigned char)tag[k]))) name += (char)tolower((unsigned char)tag[k++]);
+        if (name == "p" && !closing) out += "\x01";             // paragraph separator
+        else if (name == "p") out += "\x01";
+        else if (name == "a" && !closing) {
+            // a reference glued to the preceding word in the source ("asPs 69:4")
+            if (!out.empty() && isalpha((unsigned char)out.back())) out += ' ';
+        }
+        else if (name == "br") out += "<br />";
+        else if (name == "b" || name == "strong") out += closing ? "</strong>" : "<strong>";
+        else if (name == "i" || name == "em") out += closing ? "</em>" : "<em>";
+        // any other tag is dropped; its text stays
+    }
+    // Split on separators; drop empty paragraphs; balance emphasis per paragraph.
+    std::string result;
+    size_t pos = 0;
+    while (pos <= out.size()) {
+        size_t next = out.find('\x01', pos);
+        std::string para = out.substr(pos, next == std::string::npos ? std::string::npos : next - pos);
+        pos = next == std::string::npos ? out.size() + 1 : next + 1;
+        // balance tags
+        auto count = [&](const std::string& t) {
+            size_t n = 0, p = 0;
+            while ((p = para.find(t, p)) != std::string::npos) { n++; p += t.size(); }
+            return n;
+        };
+        size_t so = count("<strong>"), sc = count("</strong>");
+        size_t eo = count("<em>"), ec = count("</em>");
+        // Re-open at the start / close at the end if a paragraph break split a span.
+        if (sc > so) para = "<strong>" + para;
+        if (so > sc) para += "</strong>";
+        if (ec > eo) para = "<em>" + para;
+        if (eo > ec) para += "</em>";
+        // keep emphasis tags tight to their text: "<strong>x </strong>" -> "<strong>x</strong> "
+        for (const char* t : {"strong", "em"}) {
+            const std::string open = std::string("<") + t + "> ";
+            const std::string close = std::string(" </") + t + ">";
+            size_t q;
+            while ((q = para.find(open)) != std::string::npos)
+                para.replace(q, open.size(), std::string(" <") + t + ">");
+            while ((q = para.find(close)) != std::string::npos)
+                para.replace(q, close.size(), std::string("</") + t + "> ");
+        }
+        for (size_t q; (q = para.find("  ")) != std::string::npos;) para.erase(q, 1);
+        // trim whitespace
+        size_t a = para.find_first_not_of(" \t\r\n");
+        if (a == std::string::npos) continue;
+        size_t b = para.find_last_not_of(" \t\r\n");
+        para = para.substr(a, b - a + 1);
+        // text with no letters or digits (leftover punctuation/markers) is not a paragraph
+        bool hasWord = false;
+        bool inTag = false;
+        for (unsigned char c : para) {
+            if (c == '<') inTag = true;
+            else if (c == '>') inTag = false;
+            else if (!inTag && (isalnum(c) || c >= 0x80)) { hasWord = true; break; }
+        }
+        if (!hasWord) continue;
+        result += "<p>" + para + "</p>\n";
+    }
+    if (!result.empty()) result.pop_back();
+    return result;
+}
+
+
+void escapeBareAmpersands(std::string& text) {
+    std::string out;
+    out.reserve(text.size() + 8);
+    for (size_t i = 0; i < text.size(); i++) {
+        if (text[i] != '&') { out += text[i]; continue; }
+        size_t j = i + 1;
+        if (j < text.size() && text[j] == '#') j++;
+        size_t start = j;
+        while (j < text.size() && isalnum((unsigned char)text[j])) j++;
+        bool entity = j > start && j < text.size() && text[j] == ';';
+        out += entity ? "&" : "&amp;";
+    }
+    text.swap(out);
+}
+
 } // namespace SwordCommon

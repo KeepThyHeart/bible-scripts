@@ -392,6 +392,38 @@ void test_parseOsisVerse_collects_every_lemma_word() {
 
 // ============================================================================
 
+// ============================================================================
+// cleanCommentaryHtml (task 0225: Gill's dropped scripture references)
+// ============================================================================
+
+void test_cleanCommentaryHtml_keeps_reference_text() {
+    // libsword's render of Gill: <p /> separators, <b>/<i>, passagestudy anchors.
+    const std::string in =
+        "2:17 Ver. 17. <p /><b>But of the tree, </b><p /> Of the name of this tree, <i>see Gill on \""
+        "<a href=\"passagestudy.jsp?action=showRef&type=scripRef&value=Ge+2%3A9&module=\">Ge 2:9</a>\"</i>";
+    const std::string out = cleanCommentaryHtml(in);
+    CHECK(out == "<p>Ver. 17.</p>\n<p><strong>But of the tree,</strong></p>\n"
+                 "<p>Of the name of this tree, <em>see Gill on \"Ge 2:9\"</em></p>");
+    CHECK(out.find(":-") == std::string::npos);
+    CHECK(out.find("passagestudy") == std::string::npos);
+}
+
+void test_cleanCommentaryHtml_reference_glued_to_word_gets_space() {
+    const std::string out = cleanCommentaryHtml("quoted as<a href=\"x\">Ps 69:4</a> in the New Testament");
+    CHECK(out == "<p>quoted as Ps 69:4 in the New Testament</p>");
+}
+
+void test_cleanCommentaryHtml_drops_empty_paragraphs_and_balances_emphasis() {
+    const std::string out = cleanCommentaryHtml("<p /><p />  <p /><b>bold across<p />break</b>");
+    CHECK(out == "<p><strong>bold across</strong></p>\n<p><strong>break</strong></p>");
+}
+
+void test_escapeBareAmpersands() {
+    std::string s = "reign, &c.] AT&T &amp; &#8217; &lt;";
+    escapeBareAmpersands(s);
+    CHECK(s == "reign, &amp;c.] AT&amp;T &amp; &#8217; &lt;");
+}
+
 int main() {
     RUN(test_deflate_roundtrip_no_dict);
     RUN(test_deflate_roundtrip_with_dict);
@@ -411,6 +443,10 @@ int main() {
     RUN(test_parseOsisVerse_abp_word_order_numeral_dropped);
     RUN(test_parseOsisVerse_transChange_boundary_keeps_words_apart);
     RUN(test_parseOsisVerse_collects_every_lemma_word);
+    RUN(test_escapeBareAmpersands);
+    RUN(test_cleanCommentaryHtml_keeps_reference_text);
+    RUN(test_cleanCommentaryHtml_reference_glued_to_word_gets_space);
+    RUN(test_cleanCommentaryHtml_drops_empty_paragraphs_and_balances_emphasis);
 
     if (g_failures == 0) {
         std::cout << "\nALL SELFTESTS PASSED\n";

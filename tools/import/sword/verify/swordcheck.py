@@ -43,6 +43,9 @@ import urllib.request
 import zlib
 from collections import Counter, defaultdict, OrderedDict
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from commentary_checks import scan_commentary  # noqa: E402
+
 try:
     import zstandard  # optional: only needed to decode a zstd-compressed module (§3, task 0035)
 except ImportError:  # pragma: no cover - exercised by whichever environment lacks it
@@ -1585,6 +1588,17 @@ def verify_generic(zip_path, db_path, module_type, log_path=None, catalog_row=No
     for k, v in hits.items():
         if v['severity'] == 'error':
             F.add('info' if k in markup else 'warn', f'text_{k}', f'{k}: {v["rows"]} row(s)')
+    if module_type == 'commentary':
+        # Dropped scripture references (":-" stubs) and glued chapter-navigation text.
+        dmg = scan_commentary(((r[1], r[2] or '') for r in rows))
+        report['commentary_damage'] = dmg
+        for flag, n in dmg['counts'].items():
+            if n:
+                # a handful of junk endings is the source's own bad bytes (Barnes: 2 entries);
+                # a systematic one (Gill: every entry) is a conversion defect
+                sev = 'warn' if flag == 'junk_end' and n < max(20, 0.005 * len(rows)) else 'error'
+                F.add(sev, 'commentary_' + flag, f'{n} entr(ies) flagged "{flag}", e.g. '
+                      + '; '.join(f"{e['key']}: {e['excerpt'][:80]}" for e in dmg['examples'][flag][:2]))
     rnd = random.Random(seed)
     report['samples'] = [{'key': clip(r[1], 120), 'content': clip(r[2] or '', 500)}
                          for r in rnd.sample(rows, min(10, len(rows)))]
