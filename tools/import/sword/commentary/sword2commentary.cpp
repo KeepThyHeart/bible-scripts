@@ -18,6 +18,16 @@
  *
  * Usage:
  *   ./sword2commentary --input <module.zip> --output <commentary_xxx.db>
+ *                      [--clean-html] [--content-version X.Y.Z]
+ *
+ *   --clean-html  Normalise libsword's HTML into plain <p>/<strong>/<em>
+ *                 markup (used for Gill, whose ThML renders as <p /> soup):
+ *                 scripture references are kept as readable reference text
+ *                 (the app's commentary link processor turns them into links),
+ *                 libsword's passagestudy.jsp anchors and chapter-navigation
+ *                 links are dropped.
+ *   --content-version  Override module_info.content_version (default: the
+ *                 SWORD conf Version).
  *
  * Example:
  *   ./sword2commentary --input Wesley.zip --output commentary_wesley.db
@@ -71,7 +81,12 @@ static std::map<std::string, int> g_importedBooks;
 // object without needing SQLite's JSON1 extension to merge into it.
 static SwordCommon::ModuleIdentity g_identity;
 
+// Options
+static bool g_cleanHtml = false;
+static std::string g_contentVersionOverride;
+
 // Forward declarations
+std::string cleanCommentaryHtml(const std::string& rendered);
 bool createDatabase(const std::string& dbPath);
 bool parseModuleConfig(const fs::path& tempDir, const std::string& moduleName);
 bool insertModuleInfo(const SwordCommon::ModuleIdentity& identity);
@@ -110,6 +125,10 @@ int main(int argc, char* argv[]) {
             if (i + 1 < argc) outputDb = argv[++i];
         } else if (strcmp(argv[i], "--drop-cross-chapter-links") == 0) {
             g_dropCrossChapterLinks = true;
+        } else if (strcmp(argv[i], "--clean-html") == 0) {
+            g_cleanHtml = true;
+        } else if (strcmp(argv[i], "--content-version") == 0) {
+            if (i + 1 < argc) g_contentVersionOverride = argv[++i];
         } else if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0) {
             printUsage(argv[0]);
             return 0;
@@ -202,6 +221,94 @@ int main(int argc, char* argv[]) {
 }
 
 /**
+ * Normalise libsword's HTML render of a ThML commentary entry.
+ *
+ * libsword emits "<p />" as a paragraph *separator*, <b>/<i> for emphasis,
+ * <a href="passagestudy.jsp?...">ref</a> for scripture references and raw
+ * <font name="hebrew"> wrappers. Output: balanced <p>...</p> paragraphs,
+ * <strong>/<em>, and every reference as its visible text ("2Ch 29:1-3").
+ * Reference text is NEVER dropped with its element (that was the published
+ * Gill's defect, leaving ":-" stubs). Chapter-navigation runs ("2 Chronicles2Ch 27...")
+ * are removed.
+ */
+std::string cleanCommentaryHtml(const std::string& in) {
+    std::string out;
+    out.reserve(in.size() + 64);
+    size_t i = 0;
+    // The ThML source starts each entry with its own "29:1 " locator, which the
+    // app already shows as the verse heading: drop it.
+    while (i < in.size() && isdigit((unsigned char)in[i])) i++;
+    if (i > 0 && i < in.size() && in[i] == ':') {
+        i++;
+        size_t j = i;
+        while (j < in.size() && (isdigit((unsigned char)in[j]) || in[j] == '-')) j++;
+        i = (j > i) ? j : 0;
+    } else {
+        i = 0;
+    }
+    while (i < in.size()) {
+        if (in[i] != '<') { out += in[i++]; continue; }
+        size_t end = in.find('>', i);
+        if (end == std::string::npos) { out += in.substr(i); break; }
+        std::string tag = in.substr(i + 1, end - i - 1);
+        i = end + 1;
+        std::string name;
+        bool closing = false;
+        size_t k = 0;
+        if (k < tag.size() && tag[k] == '/') { closing = true; k++; }
+        while (k < tag.size() && (isalnum((unsigned char)tag[k]))) name += (char)tolower((unsigned char)tag[k++]);
+        if (name == "p" && !closing) out += "\x01";             // paragraph separator
+        else if (name == "p") out += "\x01";
+        else if (name == "a" && !closing) {
+            // a reference glued to the preceding word in the source ("asPs 69:4")
+            if (!out.empty() && isalpha((unsigned char)out.back())) out += ' ';
+        }
+        else if (name == "br") out += "<br />";
+        else if (name == "b" || name == "strong") out += closing ? "</strong>" : "<strong>";
+        else if (name == "i" || name == "em") out += closing ? "</em>" : "<em>";
+        // any other tag is dropped; its text stays
+    }
+    // Split on separators; drop empty paragraphs; balance emphasis per paragraph.
+    std::string result;
+    size_t pos = 0;
+    while (pos <= out.size()) {
+        size_t next = out.find('\x01', pos);
+        std::string para = out.substr(pos, next == std::string::npos ? std::string::npos : next - pos);
+        pos = next == std::string::npos ? out.size() + 1 : next + 1;
+        // balance tags
+        auto count = [&](const std::string& t) {
+            size_t n = 0, p = 0;
+            while ((p = para.find(t, p)) != std::string::npos) { n++; p += t.size(); }
+            return n;
+        };
+        size_t so = count("<strong>"), sc = count("</strong>");
+        size_t eo = count("<em>"), ec = count("</em>");
+        // Re-open at the start / close at the end if a paragraph break split a span.
+        if (sc > so) para = "<strong>" + para;
+        if (so > sc) para += "</strong>";
+        if (ec > eo) para = "<em>" + para;
+        if (eo > ec) para += "</em>";
+        // trim whitespace
+        size_t a = para.find_first_not_of(" \t\r\n");
+        if (a == std::string::npos) continue;
+        size_t b = para.find_last_not_of(" \t\r\n");
+        para = para.substr(a, b - a + 1);
+        // text with no letters or digits (leftover punctuation/markers) is not a paragraph
+        bool hasWord = false;
+        bool inTag = false;
+        for (unsigned char c : para) {
+            if (c == '<') inTag = true;
+            else if (c == '>') inTag = false;
+            else if (!inTag && (isalnum(c) || c >= 0x80)) { hasWord = true; break; }
+        }
+        if (!hasWord) continue;
+        result += "<p>" + para + "</p>\n";
+    }
+    if (!result.empty()) result.pop_back();
+    return result;
+}
+
+/**
  * Create the SQLite database schema
  */
 bool createDatabase(const std::string& dbPath) {
@@ -264,6 +371,7 @@ bool createDatabase(const std::string& dbPath) {
 bool parseModuleConfig(const fs::path& tempDir, const std::string& moduleName) {
     auto config = SwordCommon::parseModuleConfig(tempDir, moduleName);
     g_identity = SwordCommon::deriveModuleIdentity(config, "commentary", moduleName);
+    if (!g_contentVersionOverride.empty()) g_identity.contentVersion = g_contentVersionOverride;
 
     std::cout << "  Module UUID: " << g_identity.uuid << "\n";
     std::cout << "  Licence: "
@@ -392,8 +500,9 @@ bool convertEntries(SWModule* module) {
         // renderText() returns SWBuf BY VALUE; binding it to a `const char*`
         // leaves a dangling pointer once the temporary dies. Hold the buffer.
         const sword::SWBuf renderedBuf = module->renderText();
-        const std::string text =
+        std::string text =
             renderedBuf.length() ? std::string(renderedBuf.c_str()) : std::string();
+        if (g_cleanHtml) text = cleanCommentaryHtml(text);
 
         // Skip empty entries
         if (!SwordCommon::trim(text).empty()) {
