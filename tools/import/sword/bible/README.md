@@ -87,7 +87,35 @@ This compiles `sword2bible.cpp` into an executable called `sword2bible`.
 |--------|-------|-------------|
 | `--input` | `-i` | Input SWORD module ZIP file |
 | `--output` | `-o` | Output SQLite database file |
+| `--source-repo` | | SWORD repository the ZIP came from (default `CrossWire Bible Society`) |
+| `--source-repo-url` | | That repository's URL (default `https://crosswire.org/sword/`) |
 | `--help` | `-h` | Show help message |
+
+### Provenance
+
+Every module records where it came from in `module_info.metadata.provenance`
+(the other converters, `sword2commentary`, `sword2dictionary`, `sword2book` and
+`sword2devotional`, do the same and take the same two flags):
+
+```json
+"provenance": {
+  "converted_from": "sword",
+  "project": "The SWORD Project",
+  "publisher": "CrossWire Bible Society",
+  "publisher_url": "https://crosswire.org/sword/",
+  "module": "KJV",
+  "module_version": "3.1",
+  "attribution": "Converted from the SWORD module \"KJV\" (version 3.1), distributed by the CrossWire Bible Society (crosswire.org)."
+}
+```
+
+SWORD `.conf` files do not say which repository they were downloaded from, so
+CrossWire is assumed. For a module from another repository (Gill from Xiphos,
+eBible, ...) pass `--source-repo Xiphos --source-repo-url https://www.xiphos.org/`;
+the attribution then reads "distributed through Xiphos (xiphos.org)".
+`module_info.publisher` stays the rights holder; it is not the conversion credit.
+The wording lives in one helper, `SwordCommon::buildProvenanceJson`
+(`../common/sword_common.cpp`), with a unit test (`cd ../common && make test`).
 
 ### Quick Test
 

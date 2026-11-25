@@ -638,6 +638,8 @@ private:
         // Everything else the .conf told us, preserved for round-tripping.
         std::ostringstream metaJson;
         metaJson << "{"
+                 << "\"provenance\":" << SwordCommon::buildProvenanceJson(
+                        module->getName(), moduleInfo.contentVersion, SwordCommon::sourceRepository()) << ","
                  << "\"sword_module\":\"" << SwordCommon::jsonEscape(module->getName()) << "\","
                  << "\"sword_lang\":\"" << SwordCommon::jsonEscape(moduleInfo.languageTag) << "\","
                  << "\"sword_source_type\":\"" << SwordCommon::jsonEscape(conf("SourceType")) << "\","
@@ -1597,6 +1599,8 @@ private:
         // Rebuild the metadata blob now that we know which books were present.
         std::ostringstream metaJson;
         metaJson << "{"
+                 << "\"provenance\":" << SwordCommon::buildProvenanceJson(
+                        module->getName(), moduleInfo.contentVersion, SwordCommon::sourceRepository()) << ","
                  << "\"sword_module\":\"" << SwordCommon::jsonEscape(module->getName()) << "\","
                  << "\"sword_lang\":\"" << SwordCommon::jsonEscape(moduleInfo.languageTag) << "\","
                  << "\"sword_source_type\":\"" << SwordCommon::jsonEscape(conf("SourceType")) << "\","
@@ -1823,6 +1827,8 @@ void printUsage(const char* programName) {
     std::cout << "Options:" << std::endl;
     std::cout << "  --input, -i    Input SWORD module ZIP file" << std::endl;
     std::cout << "  --output, -o   Output SQLite database file" << std::endl;
+    std::cout << "  --source-repo NAME      SWORD repository the module came from (default: CrossWire Bible Society)" << std::endl;
+    std::cout << "  --source-repo-url URL   That repository's URL (default: https://crosswire.org/sword/)" << std::endl;
     std::cout << "  --range, -r    Optional book range to convert (e.g., 1-1 for Genesis," << std::endl;
     std::cout << "                 43-43 for John, 1-5 for Genesis through Deuteronomy)" << std::endl;
     std::cout << "                 Book numbers: 1=Gen, 43=John, 66=Revelation" << std::endl;
@@ -1888,6 +1894,8 @@ int main(int argc, char* argv[]) {
                 std::cerr << "Error: --versification requires a system name" << std::endl;
                 return 1;
             }
+        } else if (SwordCommon::parseSourceRepoArg(argc, argv, i)) {
+            // --source-repo / --source-repo-url consumed
         } else if (arg == "--help" || arg == "-h") {
             printUsage(argv[0]);
             return 0;

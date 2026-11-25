@@ -342,6 +342,39 @@ namespace SwordCommon {
     /** Escape a string for embedding in a JSON string literal. */
     std::string jsonEscape(const std::string& str);
 
+    /**
+     * The SWORD repository a .conf/module ZIP was downloaded from.
+     * SWORD .conf files do not record this, so converters take it from the
+     * --source-repo flag and default to CrossWire.
+     */
+    struct SourceRepository {
+        std::string name = "CrossWire Bible Society";
+        std::string url = "https://crosswire.org/sword/";
+    };
+
+    /** The repository used by deriveModuleIdentity / sword2bible (default CrossWire). */
+    SourceRepository& sourceRepository();
+
+    /**
+     * Consume "--source-repo NAME [URL]"-style arguments: if argv[i] is
+     * "--source-repo", reads NAME (and an optional URL via
+     * "--source-repo-url") and returns true. Used by every converter's main().
+     */
+    bool parseSourceRepoArg(int argc, char* argv[], int& i);
+
+    /** "https://www.xiphos.org/x" -> "xiphos.org" (scheme, "www." and path dropped). */
+    std::string hostOfUrl(const std::string& url);
+
+    /**
+     * The one place metadata.provenance is built. Returns the JSON object
+     * (no surrounding key), e.g. {"converted_from":"sword",...,"attribution":"..."}.
+     * CrossWire: "...distributed by the CrossWire Bible Society (crosswire.org)."
+     * Anything else: "...distributed through <name> (<host>)."
+     */
+    std::string buildProvenanceJson(const std::string& moduleName,
+                                    const std::string& moduleVersion,
+                                    const SourceRepository& repo);
+
     // ------------------------------------------------------------------
     // HTML helpers (for converters that read rendered HTML rather than raw
     // OSIS)

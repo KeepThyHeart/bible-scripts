@@ -162,6 +162,40 @@ function extractYear(text) {
   return match ? parseInt(match[1], 10) : 0;
 }
 
+const CROSSWIRE = Object.freeze({
+  name: 'CrossWire Bible Society',
+  url: 'https://crosswire.org/sword/',
+});
+
+/** "https://www.xiphos.org/x" -> "xiphos.org" */
+function hostOfUrl(url) {
+  return String(url || '').replace(/^[a-z][a-z0-9+.-]*:\/\//i, '').replace(/\/.*$/, '').replace(/^www\./i, '');
+}
+
+/**
+ * `metadata.provenance` for a module converted from a SWORD module. Mirrors
+ * SwordCommon::buildProvenanceJson (sword_common.cpp) key for key and word for
+ * word; `repo` is { name, url } of the SWORD repository it was distributed by.
+ */
+function buildProvenance(moduleName, moduleVersion, repo = CROSSWIRE) {
+  const crossWire = repo.name === CROSSWIRE.name;
+  const host = hostOfUrl(repo.url);
+  const attribution =
+    `Converted from the SWORD module "${moduleName}"` +
+    (moduleVersion ? ` (version ${moduleVersion})` : '') +
+    (crossWire ? ', distributed by the ' : ', distributed through ') +
+    repo.name + (host ? ` (${host})` : '') + '.';
+  return {
+    converted_from: 'sword',
+    project: 'The SWORD Project',
+    publisher: repo.name,
+    publisher_url: repo.url,
+    module: moduleName,
+    module_version: moduleVersion || '',
+    attribution,
+  };
+}
+
 const VERSE_LINK_INSERT_SQL = `
   INSERT INTO verse_link (source_type, source_id, verse_id_start, verse_id_end, link_type, sort_order, context)
   VALUES (?, ?, ?, ?, ?, ?, ?)
@@ -186,6 +220,9 @@ module.exports = {
   licenseToSpdx,
   licenseUrlForSpdx,
   extractYear,
+  CROSSWIRE,
+  hostOfUrl,
+  buildProvenance,
   VERSE_LINK_INSERT_SQL,
   verseLinkEnd,
 };

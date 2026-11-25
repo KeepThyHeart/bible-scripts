@@ -20,4 +20,13 @@ $(LIBRARY): $(OBJECT)
 	$(AR) $(ARFLAGS) $(LIBRARY) $(OBJECT)
 
 clean:
+	rm -f provenance_test
 	rm -f $(OBJECT) $(LIBRARY)
+
+provenance_test: provenance_test.cpp $(LIBRARY)
+	$(CXX) $(CXXFLAGS) -o $@ provenance_test.cpp -L. -lswordcommon -lsword -lsqlite3 -lzip
+
+test: provenance_test
+	./provenance_test
+
+.PHONY: test

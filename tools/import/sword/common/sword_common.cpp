@@ -1610,6 +1610,59 @@ namespace SwordCommon {
         return 0;
     }
 
+    SourceRepository& sourceRepository() {
+        static SourceRepository repo;
+        return repo;
+    }
+
+    bool parseSourceRepoArg(int argc, char* argv[], int& i) {
+        const std::string arg = argv[i];
+        if (arg == "--source-repo") {
+            if (i + 1 < argc) sourceRepository().name = argv[++i];
+            return true;
+        }
+        if (arg == "--source-repo-url") {
+            if (i + 1 < argc) sourceRepository().url = argv[++i];
+            return true;
+        }
+        return false;
+    }
+
+    std::string hostOfUrl(const std::string& url) {
+        std::string s = url;
+        const size_t scheme = s.find("://");
+        if (scheme != std::string::npos) s = s.substr(scheme + 3);
+        const size_t slash = s.find('/');
+        if (slash != std::string::npos) s = s.substr(0, slash);
+        if (s.rfind("www.", 0) == 0) s = s.substr(4);
+        return s;
+    }
+
+    std::string buildProvenanceJson(const std::string& moduleName,
+                                    const std::string& moduleVersion,
+                                    const SourceRepository& repo) {
+        const bool crossWire = (repo.name == "CrossWire Bible Society");
+        std::string attribution = "Converted from the SWORD module \"" + moduleName + "\"";
+        if (!moduleVersion.empty()) attribution += " (version " + moduleVersion + ")";
+        attribution += crossWire ? ", distributed by the " : ", distributed through ";
+        attribution += repo.name;
+        const std::string host = hostOfUrl(repo.url);
+        if (!host.empty()) attribution += " (" + host + ")";
+        attribution += ".";
+
+        std::ostringstream out;
+        out << "{"
+            << "\"converted_from\":\"sword\","
+            << "\"project\":\"The SWORD Project\","
+            << "\"publisher\":\"" << jsonEscape(repo.name) << "\","
+            << "\"publisher_url\":\"" << jsonEscape(repo.url) << "\","
+            << "\"module\":\"" << jsonEscape(moduleName) << "\","
+            << "\"module_version\":\"" << jsonEscape(moduleVersion) << "\","
+            << "\"attribution\":\"" << jsonEscape(attribution) << "\""
+            << "}";
+        return out.str();
+    }
+
     ModuleIdentity deriveModuleIdentity(const std::map<std::string, std::string>& config,
                                         const std::string& moduleType,
                                         const std::string& moduleName) {
@@ -1670,6 +1723,7 @@ namespace SwordCommon {
 
         std::ostringstream meta;
         meta << "{"
+             << "\"provenance\":" << buildProvenanceJson(moduleName, id.contentVersion, sourceRepository()) << ","
              << "\"sword_module\":\"" << jsonEscape(moduleName) << "\","
              << "\"sword_lang\":\"" << jsonEscape(lang) << "\","
              << "\"sword_source_type\":\"" << jsonEscape(get("SourceType")) << "\","

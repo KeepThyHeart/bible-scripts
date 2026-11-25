@@ -13,6 +13,7 @@ scripts/            Node scripts, grouped by function
   modules/          work on module files
     validate-module.js        conformance checker for module databases
     import-tsk.js             TSK commentary -> cross-reference database
+    patch-provenance.js       add metadata.provenance to already-built modules in place
     check-redletter.js        red-letter (words of Christ) checks
   query/            db-cli: developer CLI for querying any module database (bible,
                     commentary, dictionary, topical, book, devotional), with raw SQL
@@ -33,6 +34,10 @@ tools/
   debug/            small queries against module and user databases
 docs/               notes on the SWORD module format
 ```
+
+## Credit: SWORD and CrossWire
+
+Almost every module these scripts build is converted from a module of [The SWORD Project](https://crosswire.org/sword/), distributed by the [CrossWire Bible Society](https://crosswire.org/). Each converted module says so in `module_info.metadata.provenance` (see `tools/import/sword/bible/README.md`), and modules obtained from another SWORD repository (Xiphos, eBible, ...) name that repository instead. Existing modules can be patched without a rebuild with `scripts/modules/patch-provenance.js`.
 
 ## Running
 

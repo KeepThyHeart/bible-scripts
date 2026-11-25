@@ -97,6 +97,8 @@ int main(int argc, char* argv[]) {
             if (i + 1 < argc) inputZip = argv[++i];
         } else if (strcmp(argv[i], "--output") == 0 || strcmp(argv[i], "-o") == 0) {
             if (i + 1 < argc) outputDb = argv[++i];
+        } else if (SwordCommon::parseSourceRepoArg(argc, argv, i)) {
+            // --source-repo / --source-repo-url consumed
         } else if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0) {
             printUsage(argv[0]);
             return 0;
@@ -610,6 +612,8 @@ void printUsage(const char* programName) {
     std::cout << "Options:\n";
     std::cout << "  --input, -i   Input SWORD module ZIP file\n";
     std::cout << "  --output, -o  Output SQLite database file\n";
+    std::cout << "  --source-repo NAME     SWORD repository of origin (default: CrossWire Bible Society)\n";
+    std::cout << "  --source-repo-url URL  Its URL (default: https://crosswire.org/sword/)\n";
     std::cout << "  --help, -h    Show this help message\n\n";
     std::cout << "Books outside the 66-book Protestant canon are skipped with a warning.\n\n";
     std::cout << "Example:\n";

@@ -14,6 +14,9 @@
  * Usage:
  *   node scripts/modules/import-tsk.js [--force]
  *   node scripts/modules/import-tsk.js --input=<commentary_tsk.db> --output=<xref_tsk.db> [--force]
+ *       [--source-repo=NAME --source-repo-url=URL]   (only if the source was not distributed by CrossWire)
+ *
+ * metadata.sword_module and metadata.provenance are carried over from the source commentary.
  */
 
 const path = require('path');
@@ -47,6 +50,34 @@ const TARGET_DB_PATH = outputArg
 // ============================================================================
 // SQLite async helpers (copied from convert-topical-index.js)
 // ============================================================================
+
+function contentVersionOf(info) {
+  return (info && (info.content_version || info.version)) || '1.4';
+}
+
+/**
+ * What xref_tsk.db carries over from the source commentary's metadata:
+ * `sword_module` and `provenance`. An older commentary_tsk.db converted before
+ * provenance existed gets one built from its sword_module (or "TSK") and
+ * content_version, CrossWire as the distributor (override with
+ * --source-repo= / --source-repo-url=).
+ */
+function tskSwordTrail(info, contentVersion) {
+  let meta = {};
+  try { meta = JSON.parse((info && info.metadata) || '{}') || {}; } catch (e) { meta = {}; }
+  const moduleName = meta.sword_module || 'TSK';
+  const repoArg = process.argv.find(a => a.startsWith('--source-repo='));
+  const urlArg = process.argv.find(a => a.startsWith('--source-repo-url='));
+  let provenance = meta.provenance;
+  if (!provenance || repoArg || urlArg) {
+    const repo = {
+      name: repoArg ? repoArg.slice('--source-repo='.length) : identity.CROSSWIRE.name,
+      url: urlArg ? urlArg.slice('--source-repo-url='.length) : (repoArg ? '' : identity.CROSSWIRE.url),
+    };
+    provenance = identity.buildProvenance(moduleName, contentVersion, repo);
+  }
+  return { sword_module: moduleName, provenance };
+}
 
 function dbRun(db, sql, params = []) {
   return new Promise((resolve, reject) => {
@@ -703,10 +734,12 @@ async function main() {
 
   // Insert module info (identity + provenance)
   const abbrev = 'TSKxref';
+  // The SWORD trail of the source commentary: provenance + sword_module.
+  const swordTrail = tskSwordTrail(srcModuleInfo, contentVersionOf(srcModuleInfo));
   const languageCode = srcModuleInfo.language_code || 'en';
   const copyright = identity.stripRtfArtifacts(srcModuleInfo.copyright || '') || 'Public Domain';
   const licenseSpdx = srcModuleInfo.license_spdx || identity.licenseToSpdx(copyright) || 'PD';
-  const contentVersion = srcModuleInfo.content_version || srcModuleInfo.version || '1.4';
+  const contentVersion = contentVersionOf(srcModuleInfo);
 
   // Identity that survives content revisions — never fold the version in.
   const moduleUuid = identity.deterministicUuid(
@@ -736,7 +769,7 @@ async function main() {
       languageCode,
       identity.VERSIFICATION,
       contentVersion,
-      JSON.stringify({ sourceModule: 'commentary_tsk', convertedDate: new Date().toISOString() })
+      JSON.stringify({ sourceModule: 'commentary_tsk', ...swordTrail, convertedDate: new Date().toISOString() })
     ]
   );
 
@@ -803,6 +836,7 @@ async function main() {
     [
       JSON.stringify({
         sourceModule: 'commentary_tsk',
+        ...swordTrail,
         convertedDate: new Date().toISOString(),
         groupCount: insertedGroups,
         entryCount: insertedEntries,
