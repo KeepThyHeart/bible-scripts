@@ -1,0 +1,19 @@
+{
+  "format": "kth-voice-blends/1",
+  "note": "Weighted averages of fitted voice packs (both halves: decoder timbre ref[:, :128] and predictor prosody ref[:, 128:]). Packs are not in git; fit them with fit_reader.sh.",
+  "readers": {
+    "gentlejim": {"librivox": "GentleJim", "init": "am_onyx", "heldOutSimilarity": 0.846},
+    "harrell": {"librivox": "Dave Harrell", "init": "am_santa:0.5+bm_lewis:0.5", "heldOutSimilarity": 0.893, "debreath": true},
+    "trask": {"librivox": "laurencetrask", "init": "am_onyx:0.4+am_santa:0.3+am_puck:0.3", "heldOutSimilarity": 0.925, "debreath": true}
+  },
+  "blends": {
+    "even3": {"gentlejim": 0.3333, "harrell": 0.3333, "trask": 0.3334},
+    "jim50-harrell50": {"gentlejim": 0.5, "harrell": 0.5},
+    "jim50-trask50": {"gentlejim": 0.5, "trask": 0.5},
+    "harrell50-trask50": {"harrell": 0.5, "trask": 0.5},
+    "jim60": {"gentlejim": 0.6, "harrell": 0.2, "trask": 0.2},
+    "harrell60": {"harrell": 0.6, "gentlejim": 0.2, "trask": 0.2},
+    "trask60": {"trask": 0.6, "gentlejim": 0.2, "harrell": 0.2}
+  },
+  "used": {"harrell60": "KJV full render (Matthew onward), 2026-11-26", "jim60": "Mark trial", "trask60": "Galatians trial"}
+}
