@@ -24,6 +24,13 @@ Each verse's words are matched to the words of its phoneme string, which espeak 
 ("of the" -> ʌvðə). A verse that cannot be matched safely, about 0.6% of the KJV, is left as
 Kokoro reads it, never guessed.
 
+## Kokoro's own symbols
+
+The pronunciation data is shared with Piper, so it uses espeak-ng IPA. Before predicting, each piece's
+phonemes go through `kth_prosody/symbols.py`, which swaps in the single symbols Kokoro was trained on
+where they sound better: `ɔɪ` -> `Y` (joy, destroy: an American "oy", not "ah-ee"), and saith
+`sˈeɪᵻθ` -> `sˈAᵻθ` (a light second syllable that keeps the flow).
+
 ## Setup
 
 ```sh

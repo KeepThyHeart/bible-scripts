@@ -1,12 +1,15 @@
 """Synthesize the pieces of one chapter with the rules applied."""
 from .rules import repeated_phrases, occurrences, word_stats, plan_edits, apply_edits
+from .symbols import kokoro_symbols
 
 
 def synthesize_chapter(model, pieces, voice, speed, rules):
     """pieces: [{key, text, phonemes, detect?}]. Repeated phrases are found across the pieces
-    with detect (default true; false for a chapter heading). Yields (piece, audio, edits)."""
+    with detect (default true; false for a chapter heading). Phonemes are converted to Kokoro's own
+    symbols first (symbols.py). Yields (piece, audio, edits)."""
     phrases = repeated_phrases([p['text'] for p in pieces if p.get('detect', True)], rules)
     for p in pieces:
+        p = dict(p, phonemes=kokoro_symbols(p['phonemes']))
         st, frames = model.predict(p['phonemes'], voice, speed)
         occ = []
         if phrases and p.get('detect', True):

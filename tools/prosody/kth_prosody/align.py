@@ -16,7 +16,7 @@ PHON_CHAR = re.compile(r"[^\s,.;:!?—–\-\"“”‘’()]")
 # to tell neighbouring words apart).
 INIT = {'a': 'æɑɐʌəeɔaɚɪɛ', 'b': 'b', 'c': 'kstʃsʃ', 'd': 'dɾʤ', 'e': 'ɛiɪəeᵻɜʌjæ', 'f': 'f',
         'g': 'ɡdʒʒ', 'h': 'hwɑɛaɔoʌ', 'i': 'ɪaɪəiᵻ', 'j': 'dʒjh', 'k': 'kn', 'l': 'l', 'm': 'm',
-        'n': 'n', 'o': 'ɔɑoʌəwɚaʊ', 'p': 'pfs', 'q': 'k', 'r': 'ɹ', 's': 'sʃzθ', 't': 'tθðʃɾ',
+        'n': 'n', 'o': 'ɔɑoʌəwɚaʊY', 'p': 'pfs', 'q': 'k', 'r': 'ɹ', 's': 'sʃzθ', 't': 'tθðʃɾ',
         'u': 'ʌjuʊəɜ', 'v': 'v', 'w': 'wɹhʊ', 'x': 'zɛ', 'y': 'jɪi', 'z': 'z'}
 JOINABLE = {'a', 'be', 'were', 'was', 'is', 'are', 'am', 'fro'}
 
