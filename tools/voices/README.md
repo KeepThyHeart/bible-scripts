@@ -37,6 +37,8 @@ Stages (scripts):
   It also applies the pronunciation picks of 2026-11-26 to the pre-dumped phonemes (verily,
   merciful, yea, saith); the same picks are in the lexicon and `kth_prosody/symbols.py`, so a
   fresh phoneme dump makes these local rewrites redundant.
-- `render-bible.sh PACK OUTDIR [WORKERS]` renders the whole KJV, resumable.
+- `render-bible.sh PACK OUTDIR [WORKERS]` renders the whole KJV, resumable (`BOOKS=` limits it).
+- `bible-job.sh start|stop|status nt|ot` runs the New and Old Testament as separate resumable
+  jobs over disjoint books, so both can run at once and each can be stopped after its current chapter.
 
 Blend recipes and the three fitted readers are in `blends.json`.

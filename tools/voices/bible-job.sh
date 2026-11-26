@@ -1,0 +1,60 @@
+#!/bin/bash
+# Start, stop and check the KJV render jobs. Each job owns a fixed set of books, so jobs never
+# render the same chapter; each is resumable (finished chapters are skipped).
+#   bible-job.sh start JOB          run JOB in the foreground (run it in the background yourself)
+#   bible-job.sh stop JOB [now]     stop after the chapter in progress (or at once with "now")
+#   bible-job.sh status             every job: running or not, chapter in progress, done/total
+# Jobs: nt (Matthew-Revelation), ot (Psalms, Proverbs, then Genesis onward).
+# VOICE=harrell60 (default) or jim60 etc. picks blends/VOICE.pt and kjv-VOICE/.
+V=~/bible-audio/voices
+VOICE=${VOICE:-harrell60}
+OUT=$V/kjv-$VOICE
+J=$OUT/jobs
+mkdir -p "$J"
+books(){ case $1 in
+  nt) seq 40 66 | tr '\n' ' ';;
+  ot) echo "19 20 $(seq 1 18 | tr '\n' ' ')$(seq 21 39 | tr '\n' ' ')";;
+  *) echo "unknown job $1" >&2; exit 2;; esac; }
+desc(){ for c in $(pgrep -P $1); do echo $c; desc $c; done; }
+renderer(){ # the chapters.py process started by job pid $1
+  for q in $(desc $1); do grep -q chapters.py /proc/$q/cmdline 2>/dev/null && { echo $q; return; }; done; }
+current(){ # chapter in progress: first chapter argument of pid $1 not on disk
+  for a in $(tr '\0' ' ' < /proc/$1/cmdline 2>/dev/null); do
+    [[ $a =~ ^([0-9]+)\.([0-9]+)$ ]] || continue
+    [ -f "$(printf "%s/kjv-%02d-%03d.ogg" $OUT ${BASH_REMATCH[1]} ${BASH_REMATCH[2]})" ] || { echo $a; return; }
+  done
+}
+case $1 in
+start)
+  b=$(books $2) || exit 2
+  if [ -f "$J/$2.pid" ] && [ -d /proc/$(cat "$J/$2.pid") ]; then echo "$2 already running"; exit 1; fi
+  echo $$ > "$J/$2.pid"
+  BOOKS="$b" TAG=$2 bash $V/tools/render-bible.sh $V/blends/$VOICE.pt "$OUT" 1
+  rm -f "$J/$2.pid";;
+stop)
+  [ -f "$J/$2.pid" ] || { echo "$2 not running"; exit 0; }
+  w=$(cat "$J/$2.pid"); p=$(renderer $w)
+  if [ -z "$p" ]; then kill $w 2>/dev/null; rm -f "$J/$2.pid"; echo "$2 stopped"; exit 0; fi
+  if [ "$3" != now ]; then c=$(current $p); echo "$2: stopping after $c"; while [ "$(current $p)" = "$c" ] && [ -d /proc/$p ]; do sleep 5; done; fi
+  c=$(current $p); kill $w $p 2>/dev/null; rm -f "$J/$2.pid"
+  [[ $c =~ ^([0-9]+)\.([0-9]+)$ ]] && rm -f "$(printf "%s/kjv-%02d-%03d.f32" $OUT ${BASH_REMATCH[1]} ${BASH_REMATCH[2]})"
+  echo "$(date '+%F %H:%M') $2 stopped by request" >> "$OUT/progress.log"; echo "$2 stopped";;
+status)
+  python3 - "$OUT" <<'EOF'
+import glob, json, os, sys
+out = sys.argv[1]
+ch = {}
+for l in open(os.path.expanduser('~/bible-audio/prosody/work/kjv-phonemes.jsonl')):
+    r = json.loads(l); ch.setdefault(r['book'], set()).add(r['chapter'])
+have = {os.path.basename(f) for f in glob.glob(out + '/kjv-*.ogg')}
+for job, bs in (('nt', range(40, 67)), ('ot', [19, 20] + list(range(1, 19)) + list(range(21, 40)))):
+    allc = [(b, c) for b in bs for c in sorted(ch[b])]
+    done = [x for x in allc if f'kjv-{x[0]:02d}-{x[1]:03d}.ogg' in have]
+    nxt = next((x for x in allc if f'kjv-{x[0]:02d}-{x[1]:03d}.ogg' not in have), None)
+    pf = f'{out}/jobs/{job}.pid'
+    run = os.path.exists(pf) and os.path.isdir('/proc/' + open(pf).read().strip())
+    print(f'{job}: {"running" if run else "stopped"}, {len(done)}/{len(allc)} chapters, next {nxt}')
+EOF
+  ;;
+*) sed -n 2,9p "$0";;
+esac
