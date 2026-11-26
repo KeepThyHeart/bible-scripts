@@ -4,7 +4,7 @@
 #   bible-job.sh start JOB          run JOB in the foreground (run it in the background yourself)
 #   bible-job.sh stop JOB [now]     stop after the chapter in progress (or at once with "now")
 #   bible-job.sh status             every job: running or not, chapter in progress, done/total
-# Jobs: nt (Matthew-Revelation), ot (Psalms, Proverbs, then Genesis onward).
+# Jobs: nt (Matthew-Revelation), ot (Psalms, Proverbs, then Genesis-Job), ot2 (Ecclesiastes-Malachi).
 # VOICE=harrell60 (default) or jim60 etc. picks blends/VOICE.pt and kjv-VOICE/.
 V=~/bible-audio/voices
 VOICE=${VOICE:-harrell60}
@@ -13,7 +13,8 @@ J=$OUT/jobs
 mkdir -p "$J"
 books(){ case $1 in
   nt) seq 40 66 | tr '\n' ' ';;
-  ot) echo "19 20 $(seq 1 18 | tr '\n' ' ')$(seq 21 39 | tr '\n' ' ')";;
+  ot) echo "19 20 $(seq 1 18 | tr '\n' ' ')";;
+  ot2) seq 21 39 | tr '\n' ' ';;
   *) echo "unknown job $1" >&2; exit 2;; esac; }
 desc(){ for c in $(pgrep -P $1); do echo $c; desc $c; done; }
 renderer(){ # the chapters.py process started by job pid $1
@@ -47,7 +48,7 @@ ch = {}
 for l in open(os.path.expanduser('~/bible-audio/prosody/work/kjv-phonemes.jsonl')):
     r = json.loads(l); ch.setdefault(r['book'], set()).add(r['chapter'])
 have = {os.path.basename(f) for f in glob.glob(out + '/kjv-*.ogg')}
-for job, bs in (('nt', range(40, 67)), ('ot', [19, 20] + list(range(1, 19)) + list(range(21, 40)))):
+for job, bs in (('nt', range(40, 67)), ('ot', [19, 20] + list(range(1, 19))), ('ot2', range(21, 40))):
     allc = [(b, c) for b in bs for c in sorted(ch[b])]
     done = [x for x in allc if f'kjv-{x[0]:02d}-{x[1]:03d}.ogg' in have]
     nxt = next((x for x in allc if f'kjv-{x[0]:02d}-{x[1]:03d}.ogg' not in have), None)
