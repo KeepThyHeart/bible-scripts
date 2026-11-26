@@ -26,7 +26,7 @@ espeak is wrong, leave it.
 
 ## Known archaic forms (apply; extend the same pattern to their family)
 
-hast `hˈæst`, saith `sˈɛθ`, shew `ʃˈoʊ` (shewed `ʃˈoʊd`, shewn, shewing, sheweth, shewbread `ʃˈoʊbɹɛd`),
+hast `hˈæst`, saith `sˈeɪᵻθ` (“say-ith”, light second syllable), shew `ʃˈoʊ` (shewed `ʃˈoʊd`, shewn, shewing, sheweth, shewbread `ʃˈoʊbɹɛd`),
 wast `wˈɑːst`, wert `wˈɜːt`, doth `dˈʌθ`, -eth endings `ᵻθ`, -est endings `ᵻst`, Selah `sˈiːlə`,
 Jehovah `dʒᵻhˈoʊvə`. Check thee/thou/thy/thine/ye/hath/hadst/didst/wilt/shalt/spake/sware/clave/brasen/
 holpen/wist/wot/trow/ye etc. for plausibility.
