@@ -18,7 +18,7 @@ def put(src, dst):
     os.replace(tmp, dst); return 1
 n = 0; t = time.time()
 for voice in sys.argv[1:] or ['harrell60']:
-    for f in sorted(glob.glob(f'{V}/kjv-{voice}/kjv-*.ogg')):
+    for f in sorted(glob.glob(f'{V}/kjv-{voice}/kjv-*.ogg') + glob.glob(f'{V}/kjv-{voice}/kjv-*.json')):
         n += put(f, f'{DST}/KJV-{voice}/{os.path.basename(f)}')
 for f in sorted(glob.glob(f'{V}/blends/*.pt') + glob.glob(f'{V}/*.pt')):
     n += put(f, f'{DST}/voice-packs/{os.path.basename(f)}')

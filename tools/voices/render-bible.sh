@@ -17,7 +17,8 @@ chaps = {}
 for l in open(os.path.expanduser('~/bible-audio/prosody/work/kjv-phonemes.jsonl')):
     r = json.loads(l); chaps.setdefault(r['book'], set()).add(r['chapter'])
 todo = [f'{b}.{c}' for b in order for c in sorted(chaps.get(b, ()))
-        if not os.path.exists(os.path.join(out, f'kjv-{b:02d}-{c:03d}.ogg'))]
+        if not os.path.exists(os.path.join(out, f'kjv-{b:02d}-{c:03d}.ogg'))
+        or os.path.exists(os.path.join(out, f'kjv-{b:02d}-{c:03d}.f32'))]  # .f32 left = encode interrupted
 print(' '.join(todo))
 EOF
 )

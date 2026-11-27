@@ -42,3 +42,14 @@ Stages (scripts):
   jobs over disjoint books, so both can run at once and each can be stopped after its current chapter.
 
 Blend recipes and the three fitted readers are in `blends.json`.
+
+## Verse timings and hosting
+
+- `chapters.py` writes a `kth-audio-chapter/1` manifest (`kjv-BB-CCC.json`) next to each `.ogg`, with the
+  exact verse bounds it laid out.
+- `timings.py OUTDIR` recovers manifests for chapters rendered before that, by matching the known inserted
+  pauses to the silences in the `.ogg` (within ~25 ms of the exact timings on the chapters checked;
+  `--check` compares against exact manifests). Those carry `timing: "silence-aligned"`.
+- `validate.py OUTDIR` applies the bible repo's manifest rules and checks each `.ogg`'s size and hash.
+- `export.py [VOICE]` publishes the web app's hosting tree (`audio/v1/KJV/index.json`,
+  `audio/v1/KJV/<voice>/r1/<book>/<ccc>.json|.ogg`) into the shared folder.

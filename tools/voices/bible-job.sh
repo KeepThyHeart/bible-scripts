@@ -22,7 +22,9 @@ renderer(){ # the chapters.py process started by job pid $1
 current(){ # chapter in progress: first chapter argument of pid $1 not on disk
   for a in $(tr '\0' ' ' < /proc/$1/cmdline 2>/dev/null); do
     [[ $a =~ ^([0-9]+)\.([0-9]+)$ ]] || continue
-    [ -f "$(printf "%s/kjv-%02d-%03d.ogg" $OUT ${BASH_REMATCH[1]} ${BASH_REMATCH[2]})" ] || { echo $a; return; }
+    s=$(printf "%s/kjv-%02d-%03d" $OUT ${BASH_REMATCH[1]} ${BASH_REMATCH[2]})
+    # done = ogg written and its raw .f32 removed (the .ogg exists while ffmpeg is still encoding)
+    [ -f $s.ogg ] && [ ! -f $s.f32 ] || { echo $a; return; }
   done
 }
 case $1 in
